@@ -8,15 +8,13 @@ import plotly.graph_objects as go
 import ephem
 from timezonefinder import TimezoneFinder
 import pytz
-import time
 
 st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
 @st.cache_data(show_spinner=False)
 def obtener_ubicacion(cp):
     try:
-        # Intentamos con un User-Agent único
-        geolocator = Nominatim(user_agent="solar_app_final_v4_2026")
+        geolocator = Nominatim(user_agent="solar_app_v5_2026")
         return geolocator.geocode(cp, timeout=10)
     except:
         return None
@@ -53,14 +51,12 @@ if location:
 
     st.success(f"📍 {location.address.split(',')[0]}")
     
-    # Datos de hoy
     s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
     c1, c2, c3 = st.columns(3)
     c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
     c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
     c3.metric("Luna", get_moon_phase(ahora))
 
-    # --- GENERAR DATOS ---
     data = []
     inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
     pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
@@ -73,7 +69,9 @@ if location:
             am = s_dia['sunrise'].hour + s_dia['sunrise'].minute / 60
             at = s_dia['sunset'].hour + s_dia['sunset'].minute / 60
             
-            x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
+            if vista == "Días": x_val = i + 1
+            elif vista == "Semanas": x_val = dia_m.isocalendar()[1]
+            else: x_val = dia_m.month
 
             data.append({
                 "X": x_val, "Amanecer": am, "Duracion": at - am,
@@ -99,27 +97,24 @@ if location:
         hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
         fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
-        # Layout simplificado para evitar el ValueError
         fig.update_layout(
             template="plotly_dark",
             dragmode="pan",
             height=500,
             margin=dict(l=10, r=10, t=10, b=10),
-            showlegend=False
+            showlegend=False,
+            yaxis=dict(title="Hora", range=[0, 24], dtick=2, fixedrange=True),
+            xaxis=dict(title=vista)
         )
-        
-        # Ejes por separado para mayor seguridad
-        fig.update_yaxes(title="Hora", range=[0, 24], dtick=2, fixedrange=True)
-        fig.update_xaxes(title=vista, scrollzoom=True)
 
         st.plotly_chart(fig, use_container_width=True, config={
             'scrollZoom': True, 
             'displayModeBar': True,
-            'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'zoom2d'],
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
             'displaylogo': False
         })
     else:
-        st.info("Calculando datos astronómicos...")
+        st.info("Cargando datos...")
 else:
-    st.warning("Escribe una ubicación válida (ej: 'Barcelona, España').")
+    st.warning("Introduce una ubicación.")
     
