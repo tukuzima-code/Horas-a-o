@@ -8,20 +8,25 @@ import plotly.graph_objects as go
 import ephem
 from timezonefinder import TimezoneFinder
 import pytz
+from streamlit_js_eval import get_geolocation # Nueva librería para GPS
 
-st.set_page_config(page_title="Luz Solar Pro", layout="centered")
+st.set_page_config(page_title="Luz Solar Pro GPS", layout="centered")
 
-# MEJORA 1: Búsqueda más robusta y manejo de caché
-@st.cache_data(show_spinner=False, ttl=3600) # El caché expira en 1 hora
-def obtener_ubicacion(nombre_lugar):
-    if not nombre_lugar:
-        return None
+@st.cache_data(show_spinner=False, ttl=3600)
+def obtener_ubicacion_por_nombre(nombre_lugar):
+    busqueda = nombre_lugar if nombre_lugar else "Madrid, España"
     try:
-        # Probamos con un agente nuevo cada vez para evitar bloqueos
-        geolocator = Nominatim(user_agent="solar_app_final_2026_v7")
-        # Añadimos España si parece un CP o nombre corto para ayudar al buscador
-        query = nombre_lugar if "," in nombre_lugar else f"{nombre_lugar}, España"
-        return geolocator.geocode(query, timeout=10)
+        geolocator = Nominatim(user_agent="solar_app_final_2026_v9")
+        return geolocator.geocode(busqueda, timeout=10)
+    except:
+        return None
+
+# Función para convertir coordenadas GPS en una dirección legible
+@st.cache_data(show_spinner=False)
+def reverse_geocode(lat, lon):
+    try:
+        geolocator = Nominatim(user_agent="solar_app_final_2026_v9")
+        return geolocator.reverse(f"{lat}, {lon}", timeout=10)
     except:
         return None
 
@@ -40,25 +45,52 @@ def get_season_color(d):
     elif d < 264: return 'rgb(255, 165, 0)'   
     else: return 'rgb(210, 105, 30)'
 
-st.title("☀️ Agenda Solar Estacional")
+st.title("☀️ Agenda Solar GPS")
 
-vista = st.radio("Resolución:", ["Días", "Semanas", "Meses"], horizontal=True)
-# Sugerencia de formato para el usuario
-cp_input = st.text_input("Introduce Ciudad o CP", placeholder="Ej: Benifairó de les Valls o 46511")
+# --- SECCIÓN DE UBICACIÓN ---
+col_gps, col_txt = st.columns([1, 2])
 
-# Si el input está vacío, usamos Madrid por defecto para que no salga error
-lugar_a_buscar = cp_input if cp_input else "Madrid"
-location = obtener_ubicacion(lugar_a_buscar)
+with col_gps:
+    st.write("") # Espaciador
+    if st.button("📍 Usar mi GPS"):
+        loc_gps = get_geolocation()
+        if loc_gps:
+            st.session_state.lat = loc_gps['coords']['latitude']
+            st.session_state.lon = loc_gps['coords']['longitude']
+            st.session_state.usar_gps = True
+        else:
+            st.error("Permiso denegado")
 
-if location:
-    lat, lon = location.latitude, location.longitude
+with col_txt:
+    cp_input = st.text_input("O busca por Ciudad/CP", placeholder="Ej: Benifairó de les Valls")
+
+# Lógica para decidir qué ubicación usar
+lat, lon, address = None, None, "Madrid"
+
+if 'usar_gps' in st.session_state and st.session_state.usar_gps:
+    lat = st.session_state.lat
+    lon = st.session_state.lon
+    res_rev = reverse_geocode(lat, lon)
+    address = res_rev.address if res_rev else f"{lat}, {lon}"
+else:
+    location = obtener_ubicacion_por_nombre(cp_input)
+    if location:
+        lat, lon = location.latitude, location.longitude
+        address = location.address
+    else:
+        st.error("📍 Lugar no encontrado.")
+
+# --- PROCESAMIENTO SI HAY UBICACIÓN ---
+if lat and lon:
+    vista = st.radio("Resolución:", ["Días", "Semanas", "Meses"], horizontal=True)
+    
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat) or "UTC"
     local_tz = pytz.timezone(tz_name)
     city = LocationInfo("P", "R", tz_name, lat, lon)
     ahora = datetime.now(local_tz)
 
-    st.success(f"📍 {location.address.split(',')[0]}")
+    st.success(f"📍 Ubicación: {address.split(',')[0]}")
     
     s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
     c1, c2, c3 = st.columns(3)
@@ -66,11 +98,10 @@ if location:
     c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
     c3.metric("Luna", get_moon_phase(ahora))
 
+    # --- GRÁFICO (Mismo código anterior optimizado) ---
     data = []
     inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
     pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
-    
-    # Nombres de meses para la vista mensual
     meses_nombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
     for i in range(0, 366, pasos[vista]):
@@ -80,66 +111,32 @@ if location:
             s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
             am = s_dia['sunrise'].hour + s_dia['sunrise'].minute / 60
             at = s_dia['sunset'].hour + s_dia['sunset'].minute / 60
+            fecha_label = dia_m.strftime("%d %b")
             
-            # MEJORA 2: Formatear la fecha para el hover
-            fecha_legible = dia_m.strftime("%d de %b") # Ej: 05 de Jun
-            
-            if vista == "Días": 
-                x_val = i + 1
-                hover_label = f"Día {x_val} ({fecha_legible})"
-            elif vista == "Semanas": 
-                x_val = dia_m.isocalendar()[1]
-                hover_label = f"Semana {x_val} (Inicia {fecha_legible})"
-            else: 
-                x_val = dia_m.month
-                hover_label = meses_nombres[x_val-1]
+            x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
+            label = f"Día {x_val} ({fecha_label})" if vista=="Días" else (f"Semana {x_val}" if vista=="Semanas" else meses_nombres[x_val-1])
 
             data.append({
-                "X": x_val, 
-                "Amanecer": am, 
-                "Duracion": at - am,
+                "X": x_val, "Amanecer": am, "Duracion": at - am,
                 "Texto_A": s_dia['sunrise'].strftime('%H:%M'),
                 "Texto_At": s_dia['sunset'].strftime('%H:%M'),
-                "Luna": get_moon_phase(dia_m), 
-                "Color": get_season_color(i),
-                "Fecha_Hover": hover_label
+                "Luna": get_moon_phase(dia_m), "Color": get_season_color(i), "L": label
             })
         except: continue
 
-    if data:
-        df = pd.DataFrame(data)
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            x=df["X"], 
-            y=df["Duracion"], 
-            base=df["Amanecer"],
-            marker_color=df["Color"],
-            customdata=df[["Texto_A", "Texto_At", "Luna", "Fecha_Hover"]],
-            # Usamos customdata[3] que es nuestra fecha legible
-            hovertemplate="<b>%{customdata[3]}</b><br>☀️ Sale: %{customdata[0]}<br>🌅 Pone: %{customdata[1]}<br>🌙 Luna: %{customdata[2]}<extra></extra>"
-        ))
+    df = pd.DataFrame(data)
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df["X"], y=df["Duracion"], base=df["Amanecer"], marker_color=df["Color"],
+        customdata=df[["Texto_A", "Texto_At", "Luna", "L"]],
+        hovertemplate="<b>%{customdata[3]}</b><br>☀️ %{customdata[0]}<br>🌅 %{customdata[1]}<br>🌙 %{customdata[2]}<extra></extra>"
+    ))
+    
+    hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
+    fig.add_vline(x=hoy_x, line_width=2, line_color="red")
+    
+    fig.update_layout(template="plotly_dark", dragmode="pan", height=450, margin=dict(l=10, r=10, t=10, b=10),
+                      yaxis=dict(title="Hora", range=[0, 24], fixedrange=True), xaxis=dict(title=vista))
 
-        hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
-        fig.add_vline(x=hoy_x, line_width=2, line_color="red")
-
-        fig.update_layout(
-            template="plotly_dark",
-            dragmode="pan",
-            height=500,
-            margin=dict(l=10, r=10, t=10, b=10),
-            showlegend=False,
-            yaxis=dict(title="Hora", range=[0, 24], dtick=2, fixedrange=True),
-            xaxis=dict(title=vista)
-        )
-
-        st.plotly_chart(fig, use_container_width=True, config={
-            'scrollZoom': True, 'displayModeBar': True,
-            'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
-            'displaylogo': False
-        })
-    else:
-        st.info("Cargando datos...")
-else:
-    st.error("📍 Lugar no encontrado. Intenta ser más específico (ej: 'Benifairó de les Valls, Valencia').")
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
     
