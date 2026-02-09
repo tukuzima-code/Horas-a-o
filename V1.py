@@ -9,16 +9,24 @@ import plotly.graph_objects as go
 import ephem
 from timezonefinder import TimezoneFinder
 import pytz
+import time
 
 st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
+# FUNCIÓN DE UBICACIÓN REFORZADA
 @st.cache_data(show_spinner=False)
 def obtener_ubicacion(cp):
-    try:
-        geolocator = Nominatim(user_agent="app_solar_final_2026")
-        return geolocator.geocode(cp, timeout=10)
-    except:
-        return None
+    # Intentamos con 3 User-Agents diferentes por si uno está bloqueado
+    agentes = ["solar_app_user_1", "map_explorer_2026", "geo_viewer_xyz"]
+    for agente in agentes:
+        try:
+            geolocator = Nominatim(user_agent=agente)
+            # Añadimos una pequeña pausa para no saturar
+            time.sleep(1) 
+            return geolocator.geocode(cp, timeout=15)
+        except:
+            continue
+    return None
 
 def get_moon_phase(date):
     m = ephem.Moon(date)
@@ -30,15 +38,18 @@ def get_moon_phase(date):
     else: return "🌕"
 
 def get_season_color(d):
-    if d < 80 or d > 355: return 'rgb(100, 149, 237)'
-    elif d < 172: return 'rgb(144, 238, 144)'
-    elif d < 264: return 'rgb(255, 165, 0)'
-    else: return 'rgb(210, 105, 30)'
+    if d < 80 or d > 355: return 'rgb(100, 149, 237)' # Azul
+    elif d < 172: return 'rgb(144, 238, 144)' # Verde
+    elif d < 264: return 'rgb(255, 165, 0)'   # Naranja
+    else: return 'rgb(210, 105, 30)'           # Marrón
 
 st.title("☀️ Agenda Solar Estacional")
 
+# Selector de resolución
 vista = st.radio("Resolución:", ["Días", "Semanas", "Meses"], horizontal=True)
-cp_input = st.text_input("Introduce CP o Ciudad", "Madrid")
+
+# Entrada de ubicación (por defecto Madrid para que cargue algo)
+cp_input = st.text_input("Introduce CP o Ciudad", "Madrid, España")
 
 location = obtener_ubicacion(cp_input)
 
@@ -46,11 +57,16 @@ if location:
     lat, lon = location.latitude, location.longitude
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
+    
+    # Si no encuentra zona horaria, ponemos UTC por defecto
+    if not tz_name: tz_name = "UTC"
     local_tz = pytz.timezone(tz_name)
+    
     city = LocationInfo("P", "R", tz_name, lat, lon)
     ahora = datetime.now(local_tz)
 
-    st.subheader(f"📍 {location.address.split(',')[0]}")
+    st.success(f"📍 Conectado a: {location.address.split(',')[0]}")
+    
     s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
     
     c1, c2, c3 = st.columns(3)
@@ -58,6 +74,7 @@ if location:
     c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
     c3.metric("Luna", get_moon_phase(ahora))
 
+    # --- DATOS ---
     data = []
     inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
     pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
@@ -70,9 +87,7 @@ if location:
             am = s_dia['sunrise'].hour + s_dia['sunrise'].minute / 60
             at = s_dia['sunset'].hour + s_dia['sunset'].minute / 60
             
-            if vista == "Días": x_val = i + 1
-            elif vista == "Semanas": x_val = dia_m.isocalendar()[1]
-            else: x_val = dia_m.month
+            x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
 
             data.append({
                 "X": x_val, "Amanecer": am, "Atardecer": at,
@@ -106,7 +121,6 @@ if location:
         'modeBarButtonsToRemove': ['select2d', 'lasso2d', 'zoom2d'],
         'displaylogo': False
     })
-    st.caption("📱 Pellizca para zoom, arrastra para mover.")
 else:
-    st.warning("Escribe una ubicación válida.")
+    st.error("❌ Error de conexión: Escribe la ciudad y el país (ej: 'Barcelona, España') o intenta recargar la página.")
     
