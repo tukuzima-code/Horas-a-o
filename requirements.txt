@@ -6,3 +6,4 @@ plotly
 ephem
 pytz
 timezonefinder
+streamlit-js-eval
