@@ -11,11 +11,17 @@ import pytz
 
 st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
-@st.cache_data(show_spinner=False)
-def obtener_ubicacion(cp):
+# MEJORA 1: Búsqueda más robusta y manejo de caché
+@st.cache_data(show_spinner=False, ttl=3600) # El caché expira en 1 hora
+def obtener_ubicacion(nombre_lugar):
+    if not nombre_lugar:
+        return None
     try:
-        geolocator = Nominatim(user_agent="solar_app_v5_2026")
-        return geolocator.geocode(cp, timeout=10)
+        # Probamos con un agente nuevo cada vez para evitar bloqueos
+        geolocator = Nominatim(user_agent="solar_app_final_2026_v7")
+        # Añadimos España si parece un CP o nombre corto para ayudar al buscador
+        query = nombre_lugar if "," in nombre_lugar else f"{nombre_lugar}, España"
+        return geolocator.geocode(query, timeout=10)
     except:
         return None
 
@@ -32,14 +38,17 @@ def get_season_color(d):
     if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
     elif d < 172: return 'rgb(144, 238, 144)' 
     elif d < 264: return 'rgb(255, 165, 0)'   
-    else: return 'rgb(210, 105, 30)'           
+    else: return 'rgb(210, 105, 30)'
 
 st.title("☀️ Agenda Solar Estacional")
 
 vista = st.radio("Resolución:", ["Días", "Semanas", "Meses"], horizontal=True)
-cp_input = st.text_input("Introduce CP o Ciudad", "Madrid, España")
+# Sugerencia de formato para el usuario
+cp_input = st.text_input("Introduce Ciudad o CP", placeholder="Ej: Benifairó de les Valls o 46511")
 
-location = obtener_ubicacion(cp_input)
+# Si el input está vacío, usamos Madrid por defecto para que no salga error
+lugar_a_buscar = cp_input if cp_input else "Madrid"
+location = obtener_ubicacion(lugar_a_buscar)
 
 if location:
     lat, lon = location.latitude, location.longitude
@@ -61,6 +70,9 @@ if location:
     inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
     pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
     
+    # Nombres de meses para la vista mensual
+    meses_nombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
     for i in range(0, 366, pasos[vista]):
         if i >= 365: break
         dia_m = inicio_año + timedelta(days=i)
@@ -69,15 +81,28 @@ if location:
             am = s_dia['sunrise'].hour + s_dia['sunrise'].minute / 60
             at = s_dia['sunset'].hour + s_dia['sunset'].minute / 60
             
-            if vista == "Días": x_val = i + 1
-            elif vista == "Semanas": x_val = dia_m.isocalendar()[1]
-            else: x_val = dia_m.month
+            # MEJORA 2: Formatear la fecha para el hover
+            fecha_legible = dia_m.strftime("%d de %b") # Ej: 05 de Jun
+            
+            if vista == "Días": 
+                x_val = i + 1
+                hover_label = f"Día {x_val} ({fecha_legible})"
+            elif vista == "Semanas": 
+                x_val = dia_m.isocalendar()[1]
+                hover_label = f"Semana {x_val} (Inicia {fecha_legible})"
+            else: 
+                x_val = dia_m.month
+                hover_label = meses_nombres[x_val-1]
 
             data.append({
-                "X": x_val, "Amanecer": am, "Duracion": at - am,
+                "X": x_val, 
+                "Amanecer": am, 
+                "Duracion": at - am,
                 "Texto_A": s_dia['sunrise'].strftime('%H:%M'),
                 "Texto_At": s_dia['sunset'].strftime('%H:%M'),
-                "Luna": get_moon_phase(dia_m), "Color": get_season_color(i)
+                "Luna": get_moon_phase(dia_m), 
+                "Color": get_season_color(i),
+                "Fecha_Hover": hover_label
             })
         except: continue
 
@@ -90,8 +115,9 @@ if location:
             y=df["Duracion"], 
             base=df["Amanecer"],
             marker_color=df["Color"],
-            customdata=df[["Texto_A", "Texto_At", "Luna"]],
-            hovertemplate="<b>%{x}</b><br>☀️ %{customdata[0]}<br>🌅 %{customdata[1]}<br>🌙 %{customdata[2]}<extra></extra>"
+            customdata=df[["Texto_A", "Texto_At", "Luna", "Fecha_Hover"]],
+            # Usamos customdata[3] que es nuestra fecha legible
+            hovertemplate="<b>%{customdata[3]}</b><br>☀️ Sale: %{customdata[0]}<br>🌅 Pone: %{customdata[1]}<br>🌙 Luna: %{customdata[2]}<extra></extra>"
         ))
 
         hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
@@ -108,13 +134,12 @@ if location:
         )
 
         st.plotly_chart(fig, use_container_width=True, config={
-            'scrollZoom': True, 
-            'displayModeBar': True,
+            'scrollZoom': True, 'displayModeBar': True,
             'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
             'displaylogo': False
         })
     else:
         st.info("Cargando datos...")
 else:
-    st.warning("Introduce una ubicación.")
+    st.error("📍 Lugar no encontrado. Intenta ser más específico (ej: 'Benifairó de les Valls, Valencia').")
     
