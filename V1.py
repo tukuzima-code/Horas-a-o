@@ -9,27 +9,31 @@ import ephem
 from timezonefinder import TimezoneFinder
 import pytz
 
-st.set_page_config(page_title="Luz y Luna Pro", layout="centered")
+st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
 def get_moon_phase(date):
     m = ephem.Moon(date)
-    nn = ephem.next_new_moon(date)
-    np = ephem.next_full_moon(date)
     phase = m.phase / 100
-    if np < nn:
-        if phase < 0.1: return "🌑 Nueva"
-        if phase < 0.4: return "🌒 Creciente"
-        if phase < 0.6: return "🌓 C. Creciente"
-        return "🌕 Llena"
-    else:
-        if phase > 0.9: return "🌕 Llena"
-        if phase > 0.4: return "🌗 C. Menguante"
-        return "🌑 Nueva"
+    if phase < 0.1: return "🌑"
+    if phase < 0.4: return "🌙"
+    if phase < 0.6: return "🌓"
+    if phase < 0.9: return "🌔"
+    return "🌕"
 
-st.title("☀️ Mi Agenda Solar Personal")
+def get_season_color(day_of_year):
+    # Lógica de color según el día del año (aproximado para hemisferio norte)
+    # Invierno: Azul, Primavera: Verde, Verano: Naranja/Oro, Otoño: Marrón
+    if day_of_year < 80 or day_of_year > 355: return 'rgb(100, 149, 237)' # Azul invierno
+    elif day_of_year < 172: return 'rgb(144, 238, 144)' # Verde primavera
+    elif day_of_year < 264: return 'rgb(255, 165, 0)'   # Naranja verano
+    else: return 'rgb(210, 105, 30)'                   # Marrón otoño
+
+st.title("☀️ Agenda Solar Estacional")
+
+vista = st.radio("Cambiar resolución:", ["Días", "Semanas", "Meses"], horizontal=True)
 
 cp = st.text_input("Introduce CP o Ciudad", "Madrid")
-geolocator = Nominatim(user_agent="solar_app_v2")
+geolocator = Nominatim(user_agent="solar_app_final")
 tf = TimezoneFinder()
 
 location = geolocator.geocode(cp)
@@ -38,73 +42,67 @@ if location:
     lat, lon = location.latitude, location.longitude
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     local_tz = pytz.timezone(tz_name)
-    
     city = LocationInfo("Personal", "Region", tz_name, lat, lon)
-    
-    # --- INFO DE HOY ---
     ahora = datetime.now(local_tz)
-    semana_actual = ahora.isocalendar()[1]
-    s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
-    
-    st.subheader(f"📍 {location.address}")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
-    c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
-    c3.metric("Semana Actual", semana_actual)
 
-    # --- DATOS ANUALES ---
     data = []
     año_actual = ahora.year
-    # Empezamos el primer lunes del año
-    fecha_it = datetime(año_actual, 1, 1, tzinfo=local_tz)
+    inicio = datetime(año_actual, 1, 1, tzinfo=local_tz)
     
-    for i in range(1, 53):
-        # Calculamos el medio de la semana para la muestra
-        dia_muestra = fecha_it + timedelta(weeks=i-1)
+    pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
+    
+    for i in range(0, 365, pasos[vista]):
+        dia_m = inicio + timedelta(days=i)
         try:
-            s_dia = sun(city.observer, date=dia_muestra, tzinfo=local_tz)
+            s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
             am = s_dia['sunrise'].hour + s_dia['sunrise'].minute / 60
             at = s_dia['sunset'].hour + s_dia['sunset'].minute / 60
             
             data.append({
-                "Semana": i,
+                "X": i//pasos[vista] + 1 if vista != "Días" else i + 1,
                 "Amanecer": am,
                 "Atardecer": at,
                 "Texto_A": s_dia['sunrise'].strftime('%H:%M'),
                 "Texto_At": s_dia['sunset'].strftime('%H:%M'),
-                "Luna": get_moon_phase(dia_muestra)
+                "Luna": get_moon_phase(dia_m),
+                "Color": get_season_color(i)
             })
         except: continue
 
     df = pd.DataFrame(data)
 
-    # --- GRÁFICO ---
     fig = go.Figure()
-
-    # Barras de luz
     fig.add_trace(go.Bar(
-        x=df["Semana"],
+        x=df["X"],
         y=df["Atardecer"] - df["Amanecer"],
         base=df["Amanecer"],
-        marker_color='rgb(255, 210, 50)',
+        marker_color=df["Color"], # Aplicamos el color estacional
         name='Horas de Luz',
         customdata=df[["Texto_A", "Texto_At", "Luna"]],
-        hovertemplate="<b>Semana %{x}</b><br>Amanecer: %{customdata[0]}<br>Atardecer: %{customdata[1]}<br>Luna: %{customdata[2]}<extra></extra>"
+        hovertemplate="<b>%{x}</b><br>☀️ Sale: %{customdata[0]}<br>🌅 Pone: %{customdata[1]}<br>🌙 Luna: %{customdata[2]}<extra></extra>"
     ))
 
-    # LÍNEA ROJA (Semana actual)
-    fig.add_vline(x=semana_actual, line_width=3, line_dash="dash", line_color="red")
-    fig.add_annotation(x=semana_actual, y=23, text="Hoy", showarrow=False, font=dict(color="red"))
+    # Marcador de "Hoy"
+    hoy_x = ahora.timetuple().tm_yday if vista == "Días" else ahora.isocalendar()[1]
+    if vista != "Meses":
+        fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
     fig.update_layout(
         template="plotly_dark",
-        yaxis=dict(title="Hora del día", range=[0, 24], dtick=2),
-        xaxis=dict(title="Semanas del Año", tickmode='linear', dtick=5),
-        height=500,
-        showlegend=False
+        dragmode="pan",
+        yaxis=dict(title="Hora (0-24h)", range=[0, 24], fixedrange=True, dtick=2),
+        xaxis=dict(title=f"Eje de tiempo ({vista})", scrollzoom=True),
+        height=550,
+        margin=dict(l=0, r=0, t=20, b=0)
     )
+
+    st.plotly_chart(fig, use_container_width=True, config={
+        'scrollZoom': True,
+        'displayModeBar': True,
+        'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+        'displaylogo': False
+    })
     
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption("Nota: La línea roja indica la semana en la que te encuentras ahora.")
+    st.caption("📱 Pellizca para zoom • Arrastra para mover • Pulsa la 'casita' para resetear.")
 else:
-    st.info("Introduce una ubicación para generar tu mapa solar.")
+    st.info("Introduce tu ubicación para generar la vista.")
