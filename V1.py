@@ -23,14 +23,19 @@ def buscar_lugar_robusto(texto):
         return geolocator.geocode(texto, timeout=10, language="es")
     except: return None
 
-def get_moon_phase(date):
+def get_moon_phase_data(date):
+    """Devuelve icono y porcentaje de iluminación"""
     m = ephem.Moon(date)
-    p = m.phase / 100
-    if p < 0.1: return "🌑"
-    elif p < 0.4: return "🌙"
-    elif p < 0.6: return "🌓"
-    elif p < 0.9: return "🌔"
-    else: return "🌕"
+    p = m.phase # Porcentaje de iluminación (0-100)
+    
+    # Determinar icono según fase
+    if p < 5: icon = "🌑"
+    elif p < 45: icon = "🌙"
+    elif p < 55: icon = "🌓"
+    elif p < 95: icon = "🌔"
+    else: icon = "🌕"
+    
+    return f"{icon} {int(p)}%"
 
 def get_season_color(d):
     if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
@@ -90,7 +95,7 @@ st.markdown("---")
 m1, m2, m3 = st.columns(3)
 m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
 m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
-m3.metric("🌓 Luna", get_moon_phase(ahora))
+m3.metric("🌓 Luna", get_moon_phase_data(ahora))
 
 minutos, segundos = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
 st.metric(
@@ -114,11 +119,16 @@ for i in range(0, max_x, pasos[vista]):
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
         am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
         at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        luna = get_moon_phase_data(dia_m) # NUEVO: Calculamos luna por cada barra
+        
         x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
         data.append({
             "X": x_val, "Am": am, "Dur": at - am, 
-            "T_A": s_dia['sunrise'].strftime('%H:%M'), "T_At": s_dia['sunset'].strftime('%H:%M'), 
-            "L": dia_m.strftime("%d %b"), "Color": get_season_color(i)
+            "T_A": s_dia['sunrise'].strftime('%H:%M'), 
+            "T_At": s_dia['sunset'].strftime('%H:%M'), 
+            "L": dia_m.strftime("%d %b"), 
+            "Luna": luna, # NUEVO
+            "Color": get_season_color(i)
         })
     except: continue
 
@@ -127,8 +137,14 @@ fig = go.Figure()
 fig.add_trace(go.Bar(
     x=df["X"], y=df["Dur"], base=df["Am"], 
     marker_color=df["Color"],
-    customdata=df[["T_A", "T_At", "L"]],
-    hovertemplate="<b>%{customdata[2]}</b><br>Salida: %{customdata[0]}<br>Puesta: %{customdata[1]}<extra></extra>"
+    customdata=df[["T_A", "T_At", "L", "Luna"]], # Añadida la Luna aquí
+    hovertemplate="""
+    <b>%{customdata[2]}</b><br>
+    🌅 Salida: %{customdata[0]}<br>
+    🌇 Puesta: %{customdata[1]}<br>
+    🌙 Luna: %{customdata[3]}
+    <extra></extra>
+    """
 ))
 
 # Línea de Hoy
