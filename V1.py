@@ -33,11 +33,10 @@ def get_moon_phase(date):
     else: return "🌕"
 
 def get_season_color(d):
-    # Definición de colores por día del año
-    if d < 80 or d > 355: return 'rgb(100, 149, 237)' # Invierno
-    elif d < 172: return 'rgb(144, 238, 144)'         # Primavera
-    elif d < 264: return 'rgb(255, 165, 0)'           # Verano
-    else: return 'rgb(210, 105, 30)'                  # Otoño
+    if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
+    elif d < 172: return 'rgb(144, 238, 144)' 
+    elif d < 264: return 'rgb(255, 165, 0)'   
+    else: return 'rgb(210, 105, 30)'
 
 # --- INICIALIZACIÓN DE SESIÓN ---
 if 'lat' not in st.session_state:
@@ -58,4 +57,88 @@ with col_gps:
         if loc:
             st.session_state['lat'] = loc['coords']['latitude']
             st.session_state['lon'] = loc['coords']['longitude']
-            st.session_state['dir'] = "Ubicación
+            st.session_state['dir'] = "Ubicación GPS"
+            st.rerun()
+
+with col_txt:
+    entrada = st.text_input("Ciudad o CP", placeholder="Ej: Sagunto", label_visibility="collapsed")
+    if entrada:
+        res = buscar_lugar_robusto(entrada)
+        if res:
+            st.session_state['lat'] = res.latitude
+            st.session_state['lon'] = res.longitude
+            st.session_state['dir'] = res.address.split(',')[0]
+            st.rerun()
+
+# --- CÁLCULOS ---
+tf = TimezoneFinder()
+tz_name = tf.timezone_at(lng=st.session_state['lon'], lat=st.session_state['lat']) or "Europe/Madrid"
+local_tz = pytz.timezone(tz_name)
+city = LocationInfo("P", "R", tz_name, st.session_state['lat'], st.session_state['lon'])
+ahora = datetime.now(local_tz)
+
+st.success(f"📍 {st.session_state['dir']}")
+
+# --- MÉTRICAS (LOS CUADRITOS) ---
+s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
+s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
+dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
+dur2 = (s2['sunset'] - s2['sunrise']).total_seconds()
+dif_seg = dur2 - dur1
+
+st.markdown("---")
+m1, m2, m3 = st.columns(3)
+m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
+m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
+m3.metric("🌓 Luna", get_moon_phase(ahora))
+
+minutos, segundos = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
+st.metric(
+    label="⏱️ Cambio de luz mañana", 
+    value=f"{minutos}m {segundos}s", 
+    delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz"
+)
+st.markdown("---")
+
+# --- GRÁFICO ANUAL ---
+vista = st.radio("Escala del gráfico:", ["Días", "Semanas", "Meses"], horizontal=True)
+
+data = []
+inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
+max_x = 366 if ahora.year % 4 == 0 else 365
+pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
+
+for i in range(0, max_x, pasos[vista]):
+    dia_m = inicio_año + timedelta(days=i)
+    try:
+        s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
+        am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
+        at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
+        data.append({
+            "X": x_val, "Am": am, "Dur": at - am, 
+            "T_A": s_dia['sunrise'].strftime('%H:%M'), "T_At": s_dia['sunset'].strftime('%H:%M'), 
+            "L": dia_m.strftime("%d %b"), "Color": get_season_color(i)
+        })
+    except: continue
+
+df = pd.DataFrame(data)
+fig = go.Figure()
+fig.add_trace(go.Bar(
+    x=df["X"], y=df["Dur"], base=df["Am"], 
+    marker_color=df["Color"],
+    customdata=df[["T_A", "T_At", "L"]],
+    hovertemplate="<b>%{customdata[2]}</b><br>Salida: %{customdata[0]}<br>Puesta: %{customdata[1]}<extra></extra>"
+))
+
+# Línea de Hoy
+hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
+fig.add_vline(x=hoy_x, line_width=2, line_color="red")
+
+fig.update_layout(
+    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+    yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
+    xaxis=dict(fixedrange=True, rangeslider=dict(visible=True, thickness=0.06))
+)
+
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
