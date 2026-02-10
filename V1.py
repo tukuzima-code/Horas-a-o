@@ -102,7 +102,7 @@ rango_limite = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
-# CONFIGURACIÓN COMPATIBLE Y ESTABLE
+# CONFIGURACIÓN TÁCTIL AVANZADA
 fig.update_layout(
     template="plotly_dark", 
     dragmode="pan", 
@@ -110,21 +110,22 @@ fig.update_layout(
     margin=dict(l=10, r=10, t=10, b=10), 
     showlegend=False,
     yaxis=dict(
-        title="Hora",
         range=[0, 24], 
-        fixedrange=True,
+        fixedrange=True, # BLOQUEO VERTICAL TOTAL
         dtick=2
     ),
     xaxis=dict(
         title=vista,
-        range=[1, rango_limite],
-        fixedrange=False # Permite zoom solo en X
+        range=[hoy_x - 15, hoy_x + 15] if vista == "Días" else [1, rango_limite], # Empezar cerca de "hoy"
+        fixedrange=False,
+        constrain="domain"
     )
 )
 
+# Renderizado con config para zoom nativo
 st.plotly_chart(fig, use_container_width=True, config={
     'scrollZoom': True, 
     'displayModeBar': False,
     'doubleClick': 'reset',
 })
-st.caption("📱 Pellizca horizontalmente • Doble toque para reajustar al año completo.")
+st.caption("📱 Pellizca para ampliar • Desliza para mover • Doble toque para resetear el año.")
