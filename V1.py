@@ -41,7 +41,9 @@ def get_season_color(d):
 # --- INICIALIZACIÓN DE SESIÓN ---
 if 'lat' not in st.session_state:
     st.session_state['lat'] = 39.664
+if 'lon' not in st.session_state:
     st.session_state['lon'] = -0.228
+if 'dir' not in st.session_state:
     st.session_state['dir'] = "Puerto de Sagunto"
 
 st.title("☀️ Agenda Solar")
@@ -77,7 +79,7 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state['dir']}")
 
-# --- MÉTRICAS ---
+# --- MÉTRICAS (LOS CUADRITOS) ---
 s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
 s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
 dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
@@ -99,17 +101,24 @@ st.metric(
 st.markdown("---")
 
 # --- GRÁFICO ANUAL ---
+vista = st.radio("Escala del gráfico:", ["Días", "Semanas", "Meses"], horizontal=True)
+
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
-for i in range(0, 365, 2):
+max_x = 366 if ahora.year % 4 == 0 else 365
+pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
+
+for i in range(0, max_x, pasos[vista]):
     dia_m = inicio_año + timedelta(days=i)
     try:
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
         am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
         at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
         data.append({
-            "X": i, "Am": am, "Dur": at - am, 
-            "Color": get_season_color(i)
+            "X": x_val, "Am": am, "Dur": at - am, 
+            "T_A": s_dia['sunrise'].strftime('%H:%M'), "T_At": s_dia['sunset'].strftime('%H:%M'), 
+            "L": dia_m.strftime("%d %b"), "Color": get_season_color(i)
         })
     except: continue
 
@@ -118,15 +127,18 @@ fig = go.Figure()
 fig.add_trace(go.Bar(
     x=df["X"], y=df["Dur"], base=df["Am"], 
     marker_color=df["Color"],
-    hoverinfo='skip'
+    customdata=df[["T_A", "T_At", "L"]],
+    hovertemplate="<b>%{customdata[2]}</b><br>Salida: %{customdata[0]}<br>Puesta: %{customdata[1]}<extra></extra>"
 ))
 
-fig.add_vline(x=ahora.timetuple().tm_yday, line_width=2, line_color="red")
+# Línea de Hoy
+hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
+fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
 fig.update_layout(
     template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
-    yaxis=dict(range=[0, 24], dtick=4, fixedrange=True),
-    xaxis=dict(fixedrange=True)
+    yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
+    xaxis=dict(fixedrange=True, rangeslider=dict(visible=True, thickness=0.06))
 )
 
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
