@@ -8,19 +8,16 @@ import plotly.graph_objects as go
 import ephem
 from timezonefinder import TimezoneFinder
 import pytz
-import random
 from streamlit_js_eval import get_geolocation
 
-# Configuración inicial
 st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
-# Funciones de apoyo
+# --- FUNCIONES ---
 @st.cache_data(show_spinner=False, ttl=300)
 def buscar_lugar_robusto(texto):
     if not texto: return None
     try:
-        user_agent = f"solar_app_{random.randint(1000, 9999)}_search"
-        geolocator = Nominatim(user_agent=user_agent)
+        geolocator = Nominatim(user_agent="solar_app_v3")
         return geolocator.geocode(texto, timeout=10, language="es")
     except: return None
 
@@ -41,38 +38,30 @@ def get_season_color(d):
 
 # --- ESTADO DE SESIÓN ---
 if 'lat' not in st.session_state:
-    st.session_state.lat = 39.664
-if 'lon' not in st.session_state:
-    st.session_state.lon = -0.228
-if 'dir' not in st.session_state:
-    st.session_state.dir = "Puerto de Sagunto (Por defecto)"
+    st.session_state.lat, st.session_state.lon = 39.664, -0.228
+    st.session_state.dir = "Puerto de Sagunto"
 
 st.title("☀️ Agenda Solar")
 
-# --- INTERFAZ DE UBICACIÓN ---
+# --- UBICACIÓN ---
 col_gps, col_txt = st.columns([1, 2])
-
 with col_gps:
-    st.write("")
     if st.button("📍 GPS"):
         loc = get_geolocation()
         if loc:
-            st.session_state.lat = loc['coords']['latitude']
-            st.session_state.lon = loc['coords']['longitude']
+            st.session_state.lat, st.session_state.lon = loc['coords']['latitude'], loc['coords']['longitude']
             st.session_state.dir = "Ubicación GPS"
             st.rerun()
 
 with col_txt:
-    entrada = st.text_input("Ciudad o CP", placeholder="Puerto de Sagunto")
+    entrada = st.text_input("Buscar ciudad...", placeholder="Ej: Madrid")
     if entrada:
         res = buscar_lugar_robusto(entrada)
         if res:
-            st.session_state.lat = res.latitude
-            st.session_state.lon = res.longitude
+            st.session_state.lat, st.session_state.lon = res.latitude, res.longitude
             st.session_state.dir = res.address.split(',')[0]
             st.rerun()
 
-# --- PROCESAMIENTO DE TIEMPO ---
 tf = TimezoneFinder()
 tz_name = tf.timezone_at(lng=st.session_state.lon, lat=st.session_state.lat) or "Europe/Madrid"
 local_tz = pytz.timezone(tz_name)
@@ -80,9 +69,9 @@ city = LocationInfo("P", "R", tz_name, st.session_state.lat, st.session_state.lo
 ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state.dir}")
-vista = st.radio("Ver por:", ["Días", "Semanas", "Meses"], horizontal=True)
 
-# --- GENERACIÓN DE DATOS ---
+# --- CÁLCULO DE DATOS DEL AÑO ---
+vista = st.radio("Escala:", ["Días", "Semanas", "Meses"], horizontal=True)
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
 max_x = 366 if ahora.year % 4 == 0 else 365
@@ -92,65 +81,60 @@ for i in range(0, max_x, pasos[vista]):
     dia_m = inicio_año + timedelta(days=i)
     try:
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
-        am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
-        at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        am, at = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60, s_dia['sunset'].hour + s_dia['sunset'].minute/60
         x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
         data.append({
             "X": x_val, "Am": am, "Dur": at - am, 
-            "T_A": s_dia['sunrise'].strftime('%H:%M'), 
-            "T_At": s_dia['sunset'].strftime('%H:%M'), 
+            "S": s_dia['sunrise'].strftime('%H:%M'), "E": s_dia['sunset'].strftime('%H:%M'),
             "L": dia_m.strftime("%d %b"), "Color": get_season_color(i), "Fecha": dia_m
         })
-    except:
-        continue
-
+    except: continue
 df = pd.DataFrame(data)
 
-# --- GRÁFICO INTERACTIVO ---
+# --- PANEL FIJO: HOY ---
+st.subheader("🗓️ Datos de Hoy")
+s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
+s_man = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
+dif_seg = (s_man['sunset']-s_man['sunrise']).total_seconds() - (s_hoy['sunset']-s_hoy['sunrise']).total_seconds()
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
+c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
+c3.metric("Cambio mañ.", f"{int(abs(dif_seg)//60)}m {int(abs(dif_seg)%60)}s", 
+          delta="Ganando" if dif_seg > 0 else "Perdiendo", delta_color="normal")
+
+# --- GRÁFICO ---
 fig = go.Figure()
 fig.add_trace(go.Bar(
     x=df["X"], y=df["Dur"], base=df["Am"], 
-    marker_color=df["Color"],
-    customdata=df["L"],
-    hovertemplate="<b>%{customdata}</b><extra></extra>"
+    marker=dict(color=df["Color"], line=dict(color='white', width=0)),
+    customdata=df["L"], hovertemplate="<b>%{customdata}</b><extra></extra>"
 ))
 
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
 fig.update_layout(
-    template="plotly_dark", height=450, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
     yaxis=dict(range=[0, 24], fixedrange=True, dtick=2),
     xaxis=dict(range=[1, max_x if vista=="Días" else (53 if vista=="Semanas" else 12)], 
                fixedrange=True, rangeslider=dict(visible=True, thickness=0.08)),
     clickmode='event+select'
 )
 
-# Captura de selección táctil
+# Captura de selección (on_select="rerun" elimina el retraso de estado)
 event_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
 
-# --- LÓGICA DE DETALLES ---
-idx = 0
+# --- PANEL OPCIONAL: SELECCIÓN ---
 if event_data and len(event_data.get("selection", {}).get("points", [])) > 0:
     idx = event_data["selection"]["points"][0]["point_index"]
-else:
-    # Por defecto mostrar hoy
-    cercano = df.iloc[(df['X']-hoy_x).abs().argsort()[:1]]
-    idx = cercano.index[0]
-
-f_sel = df.iloc[idx]
-fecha_calc = f_sel['Fecha'].replace(tzinfo=local_tz)
-
-with st.expander(f"📊 Detalles: {fecha_calc.strftime('%d de %B')}", expanded=True):
-    s_h = sun(city.observer, date=fecha_calc, tzinfo=local_tz)
-    s_m = sun(city.observer, date=fecha_calc + timedelta(days=1), tzinfo=local_tz)
-    dur1, dur2 = (s_h['sunset']-s_h['sunrise']).total_seconds(), (s_m['sunset']-s_m['sunrise']).total_seconds()
-    diff = dur2 - dur1
+    f_sel = df.iloc[idx]
+    fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
     
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Tendencia", "📈 Ganando" if diff > 0 else "📉 Perdiendo")
-    c2.metric("Cambio", f"{int(abs(diff)//60)}m {int(abs(diff)%60)}s")
-    c3.metric("Luna", get_moon_phase(fecha_calc))
-    st.info(f"🌅 Amanecer: {s_h['sunrise'].strftime('%H:%M')} | 🌇 Atardecer: {s_h['sunset'].strftime('%H:%M')}")
-
-st.caption("👆 Toca una barra para analizar ese día. Los ejes están bloqueados para estabilidad.")
+    st.markdown(f"### 🔍 Detalles: {fecha_sel.strftime('%d de %B')}")
+    s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
+    
+    col_s1, col_s2, col_s3 = st.columns(3)
+    col_s1.write(f"**Amanecer:** {s_sel['sunrise'].strftime('%H:%M')}")
+    col_s2.write(f"**Atardecer:** {s
+    
