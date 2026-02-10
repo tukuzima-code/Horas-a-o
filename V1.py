@@ -14,6 +14,16 @@ from streamlit_js_eval import get_geolocation
 st.set_page_config(page_title="Luz Solar Pro", layout="wide")
 
 # --- FUNCIONES ---
+def decimal_a_horas_mins(decimal_horas):
+    """Convierte 9.4 a '9h 24min'"""
+    horas = int(decimal_horas)
+    minutos = int(round((decimal_horas - horas) * 60))
+    # Manejo de desbordamiento si minutos redondea a 60
+    if minutos == 60:
+        horas += 1
+        minutos = 0
+    return f"{horas}h {minutos}min"
+
 @st.cache_data(show_spinner=False, ttl=300)
 def buscar_lugar_robusto(texto):
     if not texto: return None
@@ -81,8 +91,8 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
 m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
 m3.metric("🌓 Luna", get_moon_phase_data(ahora))
-minutos, segundos = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
-m4.metric("⏱️ Cambio luz", f"{minutos}m {segundos}s", delta="Más luz" if dif_seg > 0 else "Menos luz")
+minutos_hoy, segundos_hoy = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
+m4.metric("⏱️ Cambio luz", f"{minutos_hoy}m {segundos_hoy}s", delta="Más luz" if dif_seg > 0 else "Menos luz")
 
 # --- GENERACIÓN DE DATOS ANUALES ---
 data = []
@@ -93,67 +103,63 @@ for i in range(0, 366):
     try:
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
         am_dt, at_dt = s_dia['sunrise'], s_dia['sunset']
-        dur = (at_dt - am_dt).total_seconds() / 3600
+        dur_decimal = (at_dt - am_dt).total_seconds() / 3600
         data.append({
             "Día": i+1, 
             "Am_dec": am_dt.hour + am_dt.minute/60, 
-            "Dur": dur, 
+            "Dur_decimal": dur_decimal, 
+            "Dur_texto": decimal_a_horas_mins(dur_decimal),
             "Amanece": am_dt.strftime('%H:%M'), 
             "Atardece": at_dt.strftime('%H:%M'), 
             "Fecha": dia_m.strftime("%d %b"),
             "Luna": get_moon_phase_data(dia_m),
-            "Full_Fecha": dia_m # Para cálculos de abajo
+            "Amanece_dt": am_dt,
+            "Atardece_dt": at_dt
         })
     except: continue
 
 df = pd.DataFrame(data)
 
-# --- GRÁFICO CON BARRA Y HOVER ---
+# --- GRÁFICO ---
 fig = go.Figure()
 fig.add_trace(go.Bar(
-    x=df["Día"], y=df["Dur"], base=df["Am_dec"], 
+    x=df["Día"], y=df["Dur_decimal"], base=df["Am_dec"], 
     marker_color=[get_season_color(i) for i in df["Día"]],
-    customdata=df[["Amanece", "Atardece", "Fecha", "Luna"]],
+    customdata=df[["Amanece", "Atardece", "Fecha", "Luna", "Dur_texto"]],
     hovertemplate="""
     <b>%{customdata[2]}</b><br>
     🌅 Salida: %{customdata[0]}<br>
     🌇 Puesta: %{customdata[1]}<br>
+    ⏱️ Duración: %{customdata[4]}<br>
     🌙 Luna: %{customdata[3]}
     <extra></extra>
     """
 ))
 
 # Iconos estaciones
-estaciones = [
-    {"dia": 80, "icon": "🌱"}, {"dia": 172, "icon": "☀️"},
-    {"dia": 264, "icon": "🍂"}, {"dia": 355, "icon": "❄️"}
-]
-for est in estaciones:
+for est in [{"dia": 80, "icon": "🌱"}, {"dia": 172, "icon": "☀️"}, {"dia": 264, "icon": "🍂"}, {"dia": 355, "icon": "❄️"}]:
     fig.add_annotation(x=est["dia"], y=0, text=est["icon"], showarrow=False, font=dict(size=20), yshift=-30)
 
 fig.add_vline(x=ahora.timetuple().tm_yday, line_width=2, line_color="red")
 
 fig.update_layout(
-    template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=60),
+    template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=60), showlegend=False,
     yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
-    xaxis=dict(
-        tickmode='array', 
-        tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
-        ticktext=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
-        rangeslider=dict(visible=True, thickness=0.04) # RECUPERADA LA BARRA
-    )
+    xaxis=dict(tickmode='array', tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
+               ticktext=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+               rangeslider=dict(visible=True, thickness=0.04))
 )
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # --- DATOS DE INTERÉS ---
 st.markdown("### 📊 Efemérides del Año")
-dia_largo = df.loc[df['Dur'].idxmax()]
-dia_corto = df.loc[df['Dur'].idxmin()]
-# Convertir string a objeto datetime para comparar amaneceres correctamente
-df['Amanece_dt'] = pd.to_datetime(df['Amanece'], format='%H:%M')
-df['Atardece_dt'] = pd.to_datetime(df['Atardece'], format='%H:%M')
-am_antes = df.loc[df['Amanece_dt'].idxmin()]
-at_tarde = df.loc[df['Atardece_dt'].idxmax()]
+
+# Cálculos de extremos
+dia_largo = df.loc[df['Dur_decimal'].idxmax()]
+dia_corto = df.loc[df['Dur_decimal'].idxmin()]
+# Para amanece antes/atardece tarde, comparamos los objetos datetime.time
+am_antes = df.loc[df['Amanece_dt'].dt.time == df['Amanece_dt'].dt.time.min()].iloc[0]
+at_tarde = df.loc[df['Atardece_dt'].dt.time == df['Atardece_dt'].dt.time.max()].iloc[0]
 
 def get_dst(year):
     m = datetime(year, 3, 31); d_m = m - timedelta(days=(m.weekday() + 1) % 7)
@@ -163,10 +169,10 @@ dst_m, dst_o = get_dst(ahora.year)
 
 f1, f2, f3 = st.columns(3)
 with f1:
-    st.write(f"🔝 **Día más largo:** {dia_largo['Fecha']} ({round(dia_largo['Dur'], 1)}h)")
-    st.write(f"📉 **Día más corto:** {dia_corto['Fecha']} ({round(dia_corto['Dur'], 1)}h)")
+    st.write(f"🔝 **Día más largo:** {dia_largo['Fecha']} — **{dia_largo['Dur_texto']}**")
+    st.write(f"📉 **Día más corto:** {dia_corto['Fecha']} — **{dia_corto['Dur_texto']}**")
 with f2:
-    st.write(f"🌅 **Amanece antes:** {am_antes['Fecha']} ({am_antes['Amanece']})")
+    st.write(f"🌅 **Amanece más pronto:** {am_antes['Fecha']} ({am_antes['Amanece']})")
     st.write(f"🌇 **Atardece más tarde:** {at_tarde['Fecha']} ({at_tarde['Atardece']})")
 with f3:
     st.write(f"🕐 **Cambio Verano:** {dst_m.strftime('%d de marzo')}")
