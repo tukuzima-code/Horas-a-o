@@ -33,20 +33,5 @@ def get_moon_phase(date):
     else: return "🌕"
 
 def get_season_color(d):
-    if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
-    elif d < 172: return 'rgb(144, 238, 144)' 
-    elif d < 264: return 'rgb(255, 165, 0)'   
-    else: return 'rgb(210, 105, 30)'
-
-# --- INICIALIZACIÓN SEGURA DEL ESTADO ---
-if 'lat' not in st.session_state:
-    st.session_state['lat'] = 39.664
-if 'lon' not in st.session_state:
-    st.session_state['lon'] = -0.228
-if 'dir' not in st.session_state:
-    st.session_state['dir'] = "Puerto de Sagunto"
-
-st.title("☀️ Agenda Solar")
-
-# --- BUSCADOR Y GPS ---
-col_gps, col_txt = st.columns
+    if d < 80 or d > 355: return 'rgb(
+        
