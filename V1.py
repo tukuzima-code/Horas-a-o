@@ -77,6 +77,7 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {direccion}")
 
+# --- GENERAR DATOS ---
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
 pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
@@ -98,34 +99,29 @@ fig = go.Figure()
 fig.add_trace(go.Bar(x=df["X"], y=df["Dur"], base=df["Am"], marker_color=df["Color"], customdata=df[["T_A", "T_At", "Luna", "L"]],
                      hovertemplate="<b>%{customdata[3]}</b><br>☀️ %{customdata[0]} | 🌅 %{customdata[1]}<br>🌙 %{customdata[2]}<extra></extra>"))
 
-rango_limite = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
+rango_max = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
-# CONFIGURACIÓN TÁCTIL AVANZADA
+# --- AJUSTE DE LÍMITES CRÍTICOS ---
 fig.update_layout(
     template="plotly_dark", 
-    dragmode="pan", 
+    dragmode="zoom", # Usar zoom en lugar de pan para evitar el arrastre infinito
     height=500, 
     margin=dict(l=10, r=10, t=10, b=10), 
     showlegend=False,
-    yaxis=dict(
-        range=[0, 24], 
-        fixedrange=True, # BLOQUEO VERTICAL TOTAL
-        dtick=2
-    ),
+    yaxis=dict(range=[0, 24], fixedrange=True, dtick=2),
     xaxis=dict(
         title=vista,
-        range=[hoy_x - 15, hoy_x + 15] if vista == "Días" else [1, rango_limite], # Empezar cerca de "hoy"
-        fixedrange=False,
-        constrain="domain"
+        range=[1, rango_max],
+        constrain="domain",
+        fixedrange=False # Permitir zoom pero intentar mantener el dominio
     )
 )
 
-# Renderizado con config para zoom nativo
 st.plotly_chart(fig, use_container_width=True, config={
-    'scrollZoom': True, 
+    'scrollZoom': False, # Desactivar el scroll libre para evitar que el eje vuele
     'displayModeBar': False,
     'doubleClick': 'reset',
 })
-st.caption("📱 Pellizca para ampliar • Desliza para mover • Doble toque para resetear el año.")
+st.caption("📱 Toca y arrastra para hacer zoom en una zona específica. Doble toque para volver.")
