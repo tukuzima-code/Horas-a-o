@@ -13,6 +13,7 @@ from streamlit_js_eval import get_geolocation
 
 st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 
+# --- FUNCIONES ---
 @st.cache_data(show_spinner=False, ttl=300)
 def buscar_lugar_robusto(texto):
     if not texto: return None
@@ -32,14 +33,20 @@ def get_moon_phase(date):
     else: return "🌕"
 
 def get_season_color(d):
-    if d < 80 or d > 355: return 'rgb(100, 149, 237)' # Invierno
-    elif d < 172: return 'rgb(144, 238, 144)' # Primavera
-    elif d < 264: return 'rgb(255, 165, 0)'   # Verano
-    else: return 'rgb(210, 105, 30)'          # Otoño
+    if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
+    elif d < 172: return 'rgb(144, 238, 144)' 
+    elif d < 264: return 'rgb(255, 165, 0)'   
+    else: return 'rgb(210, 105, 30)'
+
+# --- INICIALIZACIÓN SEGURA DEL ESTADO ---
+if 'lat' not in st.session_state:
+    st.session_state['lat'] = 39.664
+if 'lon' not in st.session_state:
+    st.session_state['lon'] = -0.228
+if 'dir' not in st.session_state:
+    st.session_state['dir'] = "Puerto de Sagunto"
 
 st.title("☀️ Agenda Solar")
 
-# --- UBICACIÓN ---
-if 'lat' not in st.session_state:
-    st.session_state.lat, st.session_state.lon = 39.
-    
+# --- BUSCADOR Y GPS ---
+col_gps, col_txt = st.columns
