@@ -57,9 +57,8 @@ with col_txt:
         st.session_state.modo = "texto"
         st.session_state.busqueda = entrada
 
-# --- LÓGICA DE UBICACIÓN ---
+# --- UBICACIÓN ---
 lat, lon, direccion = 39.664, -0.228, "Puerto de Sagunto"
-
 if st.session_state.modo == "gps":
     lat, lon = st.session_state.lat, st.session_state.lon
     direccion = "Ubicación GPS"
@@ -78,24 +77,28 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {direccion}")
 
-# --- ESTADÍSTICAS (MENÚ COLAPSABLE) ---
+# --- ESTADÍSTICAS CON CONVERSIÓN A MIN/SEG ---
 with st.expander("📊 Ver detalles del cambio de luz"):
     try:
         s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
         s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
         dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
         dur2 = (s2['sunset'] - s2['sunrise']).total_seconds()
-        delta = (dur2 - dur1) / 60
+        
+        delta_total_seg = abs(dur2 - dur1)
+        minutos = int(delta_total_seg // 60)
+        segundos = int(delta_total_seg % 60)
+        tendencia = "📈 Ganando luz" if (dur2 > dur1) else "📉 Perdiendo luz"
         
         c1, c2 = st.columns(2)
         with c1:
             st.write("**Tendencia:**")
-            st.write("📈 Ganando luz" if delta > 0 else "📉 Perdiendo luz")
+            st.write(tendencia)
         with c2:
             st.write("**Mañana habrá:**")
-            st.write(f"{abs(delta):.2f} min {'más' if delta > 0 else 'menos'}")
+            st.write(f"{minutos} min y {segundos} seg {'más' if (dur2 > dur1) else 'menos'}")
     except:
-        st.write("Datos no disponibles para esta ubicación.")
+        st.write("Datos no disponibles.")
 
 # --- GRÁFICO ---
 data = []
@@ -129,3 +132,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        
