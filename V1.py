@@ -57,13 +57,75 @@ with col_txt:
         st.session_state.modo = "texto"
         st.session_state.busqueda = entrada
 
-# Ubicación base
+# --- LÓGICA DE UBICACIÓN ---
 lat, lon, direccion = 39.664, -0.228, "Puerto de Sagunto"
+
 if st.session_state.modo == "gps":
     lat, lon = st.session_state.lat, st.session_state.lon
     direccion = "Ubicación GPS"
 elif st.session_state.modo == "texto":
     res = buscar_lugar_robusto(st.session_state.busqueda)
     if res:
-        lat, lon =
+        lat, lon = res.latitude, res.longitude
+        direccion = res.address.split(',')[0]
+
+vista = st.radio("Ver por:", ["Días", "Semanas", "Meses"], horizontal=True)
+tf = TimezoneFinder()
+tz_name = tf.timezone_at(lng=lon, lat=lat) or "Europe/Madrid"
+local_tz = pytz.timezone(tz_name)
+city = LocationInfo("P", "R", tz_name, lat, lon)
+ahora = datetime.now(local_tz)
+
+st.success(f"📍 {direccion}")
+
+# --- ESTADÍSTICAS (MENÚ COLAPSABLE) ---
+with st.expander("📊 Ver detalles del cambio de luz"):
+    try:
+        s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
+        s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
+        dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
+        dur2 = (s2['sunset'] - s2['sunrise']).total_seconds()
+        delta = (dur2 - dur1) / 60
         
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("**Tendencia:**")
+            st.write("📈 Ganando luz" if delta > 0 else "📉 Perdiendo luz")
+        with c2:
+            st.write("**Mañana habrá:**")
+            st.write(f"{abs(delta):.2f} min {'más' if delta > 0 else 'menos'}")
+    except:
+        st.write("Datos no disponibles para esta ubicación.")
+
+# --- GRÁFICO ---
+data = []
+inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
+pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
+max_x = 366 if ahora.year % 4 == 0 else 365
+
+for i in range(0, max_x, pasos[vista]):
+    dia_m = inicio_año + timedelta(days=i)
+    try:
+        s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
+        am, at = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60, s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        f_label = dia_m.strftime("%d %b")
+        x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
+        data.append({"X": x_val, "Am": am, "Dur": at - am, "T_A": s_dia['sunrise'].strftime('%H:%M'), "T_At": s_dia['sunset'].strftime('%H:%M'), "L": f_label, "Color": get_season_color(i), "Luna": get_moon_phase(dia_m)})
+    except: continue
+
+df = pd.DataFrame(data)
+fig = go.Figure()
+fig.add_trace(go.Bar(x=df["X"], y=df["Dur"], base=df["Am"], marker_color=df["Color"], customdata=df[["T_A", "T_At", "Luna", "L"]],
+                     hovertemplate="<b>%{customdata[3]}</b><br>☀️ %{customdata[0]} | 🌅 %{customdata[1]}<br>🌙 %{customdata[2]}<extra></extra>"))
+
+rango_max = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
+hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
+fig.add_vline(x=hoy_x, line_width=2, line_color="red")
+
+fig.update_layout(
+    template="plotly_dark", dragmode=False, height=500, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+    yaxis=dict(range=[0, 24], fixedrange=True, dtick=2),
+    xaxis=dict(title=vista, range=[1, rango_max], fixedrange=True, rangeslider=dict(visible=True, thickness=0.08))
+)
+
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
