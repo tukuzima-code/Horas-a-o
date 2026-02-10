@@ -25,25 +25,22 @@ def decimal_a_horas_mins(decimal_horas):
 
 @st.cache_data(show_spinner=False, ttl=600)
 def buscar_ubicacion(texto):
-    """Buscador tolerante a mayúsculas, tildes y CPs"""
+    """Buscador ultra-robusto que prioriza el texto directo del usuario"""
     if not texto: return None
     try:
-        user_agent = f"solar_app_{random.randint(1000, 9999)}"
-        geolocator = Nominatim(user_agent=user_agent)
+        # Generamos un agente aleatorio para evitar bloqueos de la API
+        n = random.randint(1000, 9999)
+        geolocator = Nominatim(user_agent=f"solar_search_app_{n}")
         
-        # Limpieza básica
-        query = texto.strip()
+        # Intento 1: Tal cual lo escribe el usuario (Mejor para nombres con tildes o en valenciano)
+        location = geolocator.geocode(texto.strip(), timeout=10, language="es")
         
-        # Intento 1: Búsqueda focalizada en España (para CP y nombres locales)
-        search_query = query if "," in query else f"{query}, Spain"
-        location = geolocator.geocode(search_query, timeout=10, language="es")
-        
-        # Intento 2: Búsqueda global si la primera falla
+        # Intento 2: Si falla, añadir ", Spain" (Útil para códigos postales o nombres genéricos)
         if not location:
-            location = geolocator.geocode(query, timeout=10)
+            location = geolocator.geocode(f"{texto.strip()}, Spain", timeout=10)
             
         return location
-    except:
+    except Exception as e:
         return None
 
 def get_moon_phase_data(date):
@@ -64,7 +61,7 @@ def get_season_color(d):
     elif d < 264: return 'rgb(255, 165, 0)'           # Verano
     else: return 'rgb(210, 105, 30)'                  # Otoño
 
-# --- INICIALIZACIÓN DE SESIÓN (Valores por defecto) ---
+# --- INICIALIZACIÓN DE SESIÓN ---
 if 'lat' not in st.session_state:
     st.session_state['lat'], st.session_state['lon'] = 39.664, -0.228
     st.session_state['dir'] = "Puerto de Sagunto"
@@ -73,7 +70,7 @@ st.title("☀️ Agenda Solar & Efemérides")
 
 # --- BUSCADOR ---
 entrada = st.text_input("Introduce población o código postal", 
-                        placeholder="Ej: Benifairó de les Valls o 46520...")
+                        placeholder="Ej: Benifairó de les Valls, Sagunto, 46520...")
 
 if entrada:
     res = buscar_ubicacion(entrada)
@@ -81,7 +78,7 @@ if entrada:
         st.session_state['lat'], st.session_state['lon'] = res.latitude, res.longitude
         st.session_state['dir'] = res.address.split(',')[0]
     else:
-        st.warning(f"No se ha podido encontrar '{entrada}'. Revisa la ortografía.")
+        st.error(f"📍 No se ha encontrado '{entrada}'. Prueba a escribirlo de otra forma.")
 
 # --- CÁLCULOS ASTRONÓMICOS ---
 tf = TimezoneFinder()
@@ -148,7 +145,6 @@ fig.add_trace(go.Bar(
     """
 ))
 
-# Iconos de estaciones
 for est in [{"dia": 80, "icon": "🌱"}, {"dia": 172, "icon": "☀️"}, {"dia": 264, "icon": "🍂"}, {"dia": 355, "icon": "❄️"}]:
     fig.add_annotation(x=est["dia"], y=0, text=est["icon"], showarrow=False, font=dict(size=20), yshift=-30)
 
@@ -158,8 +154,7 @@ fig.update_layout(
     template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=60), showlegend=False,
     yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
     xaxis=dict(
-        tickmode='array', 
-        tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
+        tickmode='array', tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
         ticktext=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
         rangeslider=dict(visible=True, thickness=0.04)
     )
@@ -173,12 +168,8 @@ d_corto = df.loc[df['Dur_decimal'].idxmin()]
 am_antes = df.loc[df['Amanece_dt'].dt.time == df['Amanece_dt'].dt.time.min()].iloc[0]
 at_tarde = df.loc[df['Atardece_dt'].dt.time == df['Atardece_dt'].dt.time.max()].iloc[0]
 
-# Cambio de hora (último domingo marzo/octubre)
-def get_dst(year):
-    m = datetime(year, 3, 31); dst_v = m - timedelta(days=(m.weekday() + 1) % 7)
-    o = datetime(year, 10, 31); dst_i = o - timedelta(days=(o.weekday() + 1) % 7)
-    return dst_v, dst_i
-dv, di = get_dst(ahora.year)
+m_marzo = datetime(ahora.year, 3, 31); dv = m_marzo - timedelta(days=(m_marzo.weekday() + 1) % 7)
+m_oct = datetime(ahora.year, 10, 31); di = m_oct - timedelta(days=(m_oct.weekday() + 1) % 7)
 
 f1, f2, f3 = st.columns(3)
 with f1:
