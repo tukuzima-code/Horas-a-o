@@ -57,7 +57,7 @@ with col_txt:
         st.session_state.modo = "texto"
         st.session_state.busqueda = entrada
 
-lat, lon, direccion = 39.664, -0.228, "Puerto de Sagunto (Por defecto)"
+lat, lon, direccion = 39.664, -0.228, "Puerto de Sagunto"
 if st.session_state.modo == "gps":
     lat, lon = st.session_state.lat, st.session_state.lon
     direccion = "Ubicación GPS"
@@ -66,7 +66,6 @@ elif st.session_state.modo == "texto":
     if res:
         lat, lon = res.latitude, res.longitude
         direccion = res.address.split(',')[0]
-    else: st.warning("⚠️ Usando Puerto de Sagunto.")
 
 vista = st.radio("Ver por:", ["Días", "Semanas", "Meses"], horizontal=True)
 tf = TimezoneFinder()
@@ -77,7 +76,7 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {direccion}")
 
-# --- GENERAR DATOS ---
+# --- DATOS ---
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
 pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
@@ -103,25 +102,24 @@ rango_max = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
-# --- AJUSTE DE LÍMITES CRÍTICOS ---
+# --- AJUSTE DE EJES FIJOS ---
 fig.update_layout(
     template="plotly_dark", 
-    dragmode="zoom", # Usar zoom en lugar de pan para evitar el arrastre infinito
-    height=500, 
+    dragmode=False, # Desactivamos el arrastre manual para evitar que "vuele"
+    height=550, 
     margin=dict(l=10, r=10, t=10, b=10), 
     showlegend=False,
     yaxis=dict(range=[0, 24], fixedrange=True, dtick=2),
     xaxis=dict(
         title=vista,
         range=[1, rango_max],
-        constrain="domain",
-        fixedrange=False # Permitir zoom pero intentar mantener el dominio
+        fixedrange=True, # Bloqueamos el eje X principal igual que el Y
+        rangeslider=dict(visible=True, thickness=0.08) # Añadimos el control inferior
     )
 )
 
 st.plotly_chart(fig, use_container_width=True, config={
-    'scrollZoom': False, # Desactivar el scroll libre para evitar que el eje vuele
     'displayModeBar': False,
-    'doubleClick': 'reset',
+    'staticPlot': False # Permitimos interacción solo via rangeslider
 })
-st.caption("📱 Toca y arrastra para hacer zoom en una zona específica. Doble toque para volver.")
+st.caption("📱 Usa la barra gris de abajo para ampliar o moverte por el año.")
