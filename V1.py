@@ -9,10 +9,9 @@ import ephem
 from timezonefinder import TimezoneFinder
 import pytz
 import random
-import time
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Agenda Solar Pro", layout="wide")
+st.set_page_config(page_title="Luz Solar Pro", layout="wide")
 
 def decimal_a_horas_mins(decimal_horas):
     horas = int(decimal_horas)
@@ -21,31 +20,29 @@ def decimal_a_horas_mins(decimal_horas):
     return f"{horas}h {minutos}min"
 
 @st.cache_data(show_spinner=False, ttl=600)
-def buscar_ubicacion_blindada(texto):
-    """Buscador con triple redundancia y headers simulados"""
+def buscar_ubicacion_total(texto):
+    """Buscador multicanal: Intenta varios servicios si uno falla"""
     if not texto: return None
     
-    # Lista de posibles URLs para evitar bloqueos
-    queries = [texto.strip(), f"{texto.strip()}, Spain", f"{texto.strip()}, España"]
+    # Lista de endpoints para máxima fiabilidad
+    urls = [
+        f"https://nominatim.openstreetmap.org/search?q={texto.strip()}&format=json&limit=1",
+        f"https://nominatim.openstreetmap.org/search?q={texto.strip()},Spain&format=json&limit=1",
+        f"https://nominatim.openstreetmap.org/search?postalcode={texto.strip()}&country=Spain&format=json&limit=1"
+    ]
     
-    for q in queries:
+    for url in urls:
         try:
-            # Simulamos un navegador real para evitar que nos bloqueen
-            url = f"https://nominatim.openstreetmap.org/search?q={q}&format=json&limit=1"
-            headers = {
-                'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SolarApp_{random.randint(1,1000)}',
-                'Accept-Language': 'es-ES,es;q=0.9'
-            }
-            response = requests.get(url, headers=headers, timeout=5)
-            data = response.json()
-            
-            if data and len(data) > 0:
-                return {
-                    "lat": float(data[0]["lat"]),
-                    "lon": float(data[0]["lon"]),
-                    "name": data[0]["display_name"].split(',')[0]
-                }
-            time.sleep(0.5) # Pausa técnica para no saturar
+            headers = {'User-Agent': f'SolarApp_Project_{random.randint(1,9999)}'}
+            response = requests.get(url, headers=headers, timeout=8)
+            if response.status_code == 200:
+                data = response.json()
+                if data and len(data) > 0:
+                    return {
+                        "lat": float(data[0]["lat"]),
+                        "lon": float(data[0]["lon"]),
+                        "name": data[0]["display_name"].split(',')[0]
+                    }
         except:
             continue
     return None
@@ -69,19 +66,18 @@ if 'lat' not in st.session_state:
 st.title("☀️ Agenda Solar & Efemérides")
 
 # --- BUSCADOR ---
-with st.container():
-    entrada = st.text_input("📍 Introduce población o código postal", 
-                            placeholder="Escribe y pulsa Enter (ej: Benifairo de les Valls o 46520)")
+entrada = st.text_input("📍 Introduce población o CP (Ej: Benifairo de les Valls, 46511, Valencia...)", 
+                        placeholder="Escribe y pulsa Enter")
 
-    if entrada:
-        with st.spinner('Buscando ubicación...'):
-            res = buscar_ubicacion_blindada(entrada)
-            if res:
-                st.session_state.lat, st.session_state.lon = res["lat"], res["lon"]
-                st.session_state.dir = res["name"]
-                st.success(f"Ubicación encontrada: {res['name']}")
-            else:
-                st.error(f"❌ No hemos podido localizar '{entrada}'. Intenta escribirlo de otra forma.")
+if entrada:
+    with st.spinner('Consultando satélites...'):
+        res = buscar_ubicacion_total(entrada)
+        if res:
+            st.session_state.lat, st.session_state.lon = res["lat"], res["lon"]
+            st.session_state.dir = res["name"]
+            st.toast(f"✅ Cargado: {res['name']}", icon="📍")
+        else:
+            st.error(f"❌ Error: No se pudo localizar '{entrada}'. Intenta con el Código Postal.")
 
 # --- CÁLCULOS ---
 tf = TimezoneFinder()
@@ -90,7 +86,7 @@ local_tz = pytz.timezone(tz_name)
 city = LocationInfo("L", "R", tz_name, st.session_state.lat, st.session_state.lon)
 ahora = datetime.now(local_tz)
 
-st.info(f"🌍 Mostrando datos para: **{st.session_state.dir}**")
+st.success(f"🌍 Ubicación activa: **{st.session_state.dir}**")
 
 # --- MÉTRICAS ---
 s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
@@ -101,7 +97,8 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
 m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
 m3.metric("🌓 Luna", get_moon_phase_data(ahora))
-m4.metric("⏱️ Cambio luz", f"{int(abs(dif)//60)}m {int(abs(dif)%60)}s", delta="Ganando luz" if dif > 0 else "Perdiendo luz")
+m4.metric("⏱️ Cambio luz", f"{int(abs(dif)//60)}m {int(abs(dif)%60)}s", 
+          delta="Ganando luz" if dif > 0 else "Perdiendo luz")
 
 # --- GRÁFICO ---
 data = []
@@ -141,22 +138,22 @@ fig.update_layout(template="plotly_dark", height=500, margin=dict(l=10, r=10, t=
                rangeslider=dict(visible=True, thickness=0.04)))
 st.plotly_chart(fig, use_container_width=True)
 
-# --- EFEMÉRIDES ---
-st.subheader("📊 Datos del Año")
+# --- PANEL INFERIOR ---
+st.markdown("---")
+col_inf1, col_inf2, col_inf3 = st.columns(3)
 d_l = df.loc[df['Dur_dec'].idxmax()]; d_c = df.loc[df['Dur_dec'].idxmin()]
 a_a = df.loc[df['Am_dt'].dt.time == df['Am_dt'].dt.time.min()].iloc[0]
 a_t = df.loc[df['At_dt'].dt.time == df['At_dt'].dt.time.max()].iloc[0]
-m_m = datetime(ahora.year, 3, 31); dv = m_m - timedelta(days=(m_m.weekday() + 1) % 7)
-m_o = datetime(ahora.year, 10, 31); di = m_o - timedelta(days=(m_o.weekday() + 1) % 7)
 
-c1, c2, c3 = st.columns(3)
-with c1:
+with col_inf1:
     st.write(f"🔝 **Día más largo:** {d_l['Fecha']} ({d_l['Dur_txt']})")
     st.write(f"📉 **Día más corto:** {d_c['Fecha']} ({d_c['Dur_txt']})")
-with c2:
+with col_inf2:
     st.write(f"🌅 **Amanece antes:** {a_a['Fecha']} ({a_a['Am']})")
     st.write(f"🌇 **Atardece tarde:** {a_t['Fecha']} ({a_t['At']})")
-with c3:
-    st.write(f"🕐 **Horario Verano:** {dv.strftime('%d de marzo')}")
-    st.write(f"🕒 **Horario Invierno:** {di.strftime('%d de octubre')}")
+with col_inf3:
+    m_m = datetime(ahora.year, 3, 31); dv = m_m - timedelta(days=(m_m.weekday() + 1) % 7)
+    m_o = datetime(ahora.year, 10, 31); di = m_o - timedelta(days=(m_o.weekday() + 1) % 7)
+    st.write(f"🕐 **Cambio Verano:** {dv.strftime('%d Mar')}")
+    st.write(f"🕒 **Cambio Invierno:** {di.strftime('%d Oct')}")
     
