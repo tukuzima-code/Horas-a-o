@@ -35,5 +35,98 @@ def get_moon_phase(date):
 def get_season_color(d):
     if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
     elif d < 172: return 'rgb(144, 238, 144)' 
-    elif
-    
+    elif d < 264: return 'rgb(255, 165, 0)'   
+    else: return 'rgb(210, 105, 30)'
+
+# --- INICIALIZACIÓN DE SESIÓN ---
+if 'lat' not in st.session_state:
+    st.session_state['lat'] = 39.664
+    st.session_state['lon'] = -0.228
+    st.session_state['dir'] = "Puerto de Sagunto"
+
+st.title("☀️ Agenda Solar")
+
+# --- BUSCADOR Y GPS ---
+col_gps, col_txt = st.columns([1, 3])
+
+with col_gps:
+    if st.button("📍 GPS"):
+        loc = get_geolocation()
+        if loc:
+            st.session_state['lat'] = loc['coords']['latitude']
+            st.session_state['lon'] = loc['coords']['longitude']
+            st.session_state['dir'] = "Ubicación GPS"
+            st.rerun()
+
+with col_txt:
+    entrada = st.text_input("Ciudad o CP", placeholder="Ej: Sagunto", label_visibility="collapsed")
+    if entrada:
+        res = buscar_lugar_robusto(entrada)
+        if res:
+            st.session_state['lat'] = res.latitude
+            st.session_state['lon'] = res.longitude
+            st.session_state['dir'] = res.address.split(',')[0]
+            st.rerun()
+
+# --- CÁLCULOS ---
+tf = TimezoneFinder()
+tz_name = tf.timezone_at(lng=st.session_state['lon'], lat=st.session_state['lat']) or "Europe/Madrid"
+local_tz = pytz.timezone(tz_name)
+city = LocationInfo("P", "R", tz_name, st.session_state['lat'], st.session_state['lon'])
+ahora = datetime.now(local_tz)
+
+st.success(f"📍 {st.session_state['dir']}")
+
+# --- MÉTRICAS ---
+s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
+s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
+dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
+dur2 = (s2['sunset'] - s2['sunrise']).total_seconds()
+dif_seg = dur2 - dur1
+
+st.markdown("---")
+m1, m2, m3 = st.columns(3)
+m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
+m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
+m3.metric("🌓 Luna", get_moon_phase(ahora))
+
+minutos, segundos = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
+st.metric(
+    label="⏱️ Cambio de luz mañana", 
+    value=f"{minutos}m {segundos}s", 
+    delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz"
+)
+st.markdown("---")
+
+# --- GRÁFICO ANUAL ---
+data = []
+inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
+for i in range(0, 365, 2):
+    dia_m = inicio_año + timedelta(days=i)
+    try:
+        s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
+        am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
+        at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        data.append({
+            "X": i, "Am": am, "Dur": at - am, 
+            "Color": get_season_color(i)
+        })
+    except: continue
+
+df = pd.DataFrame(data)
+fig = go.Figure()
+fig.add_trace(go.Bar(
+    x=df["X"], y=df["Dur"], base=df["Am"], 
+    marker_color=df["Color"],
+    hoverinfo='skip'
+))
+
+fig.add_vline(x=ahora.timetuple().tm_yday, line_width=2, line_color="red")
+
+fig.update_layout(
+    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+    yaxis=dict(range=[0, 24], dtick=4, fixedrange=True),
+    xaxis=dict(fixedrange=True)
+)
+
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
