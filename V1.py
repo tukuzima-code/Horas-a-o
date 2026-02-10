@@ -39,48 +39,7 @@ def get_season_color(d):
 
 st.title("☀️ Agenda Solar")
 
-if 'sel_idx' not in st.session_state:
-    st.session_state.sel_idx = None
+if 'modo' not in st.session_state:
+    st.session_state.modo = 'defecto'
 
-col_gps, col_txt = st.columns([1, 2])
-with col_gps:
-    st.write("")
-    if st.button("📍 GPS"):
-        loc = get_geolocation()
-        if loc:
-            st.session_state.lat, st.session_state.lon = loc['coords']['latitude'], loc['coords']['longitude']
-            st.session_state.modo = "gps"
-
-with col_txt:
-    entrada = st.text_input("Ciudad o CP", placeholder="Puerto de Sagunto")
-    if entrada:
-        st.session_state.modo = "texto"
-        st.session_state.busqueda = entrada
-
-# --- UBICACIÓN ---
-lat, lon, direccion = 39.664, -0.228, "Puerto de Sagunto"
-if st.session_state.get('modo') == "gps":
-    lat, lon = st.session_state.lat, st.session_state.lon
-    direccion = "Ubicación GPS"
-elif st.session_state.get('modo') == "texto":
-    res = buscar_lugar_robusto(st.session_state.busqueda)
-    if res:
-        lat, lon = res.latitude, res.longitude
-        direccion = res.address.split(',')[0]
-
-tf = TimezoneFinder()
-tz_name = tf.timezone_at(lng=lon, lat=lat) or "Europe/Madrid"
-local_tz = pytz.timezone(tz_name)
-city = LocationInfo("P", "R", tz_name, lat, lon)
-ahora = datetime.now(local_tz)
-
-st.success(f"📍 {direccion}")
-vista = st.radio("Ver por:", ["Días", "Semanas", "Meses"], horizontal=True)
-
-# --- GENERAR DATOS ---
-data = []
-inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
-max_x = 366 if ahora.year % 4 == 0 else 365
-pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
-
-for i in range(0, max_x, pasos[vista]):
+col_gps, col_
