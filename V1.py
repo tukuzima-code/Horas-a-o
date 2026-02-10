@@ -103,17 +103,25 @@ rango_limite = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
+# BLOQUEO AGRESIVO DE EJES
 fig.update_layout(
     template="plotly_dark", 
-    dragmode="zoom", # Cambiado a zoom para seleccionar área
+    dragmode="pan", 
     height=500, 
     margin=dict(l=10, r=10, t=10, b=10), 
     showlegend=False,
-    yaxis=dict(range=[0, 24], fixedrange=True), # Bloqueo TOTAL del eje Y
+    yaxis=dict(
+        range=[0, 24], 
+        fixedrange=True # Esto evita que el eje Y se mueva nada
+    ),
     xaxis=dict(
         title=vista,
         range=[1, rango_limite],
-        fixedrange=False # Permitimos ampliar solo aquí
+        # Los siguientes dos parámetros evitan que se salga de los bordes del año
+        autorange=False,
+        fixedrange=False,
+        # Impedimos que el usuario arrastre fuera de los límites 1 a 366
+        rangebounds=[1, rango_limite] if vista == "Días" else None 
     )
 )
 
@@ -122,4 +130,4 @@ st.plotly_chart(fig, use_container_width=True, config={
     'displayModeBar': False,
     'doubleClick': 'reset',
 })
-st.caption("📱 Desliza para ampliar una zona. Doble toque para volver al año completo.")
+st.caption("📱 Pellizca horizontalmente. La vista está limitada estrictamente al año actual.")
