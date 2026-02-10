@@ -70,7 +70,7 @@ local_tz = pytz.timezone(tz_name)
 city = LocationInfo("P", "R", tz_name, st.session_state['lat'], st.session_state['lon'])
 ahora = datetime.now(local_tz)
 
-st.info(f"📍 **{st.session_state['dir']}** ({tz_name})")
+st.info(f"📍 **{st.session_state['dir']}**")
 
 # --- MÉTRICAS HOY ---
 s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
@@ -95,74 +95,80 @@ for i in range(0, 366):
         am_dt, at_dt = s_dia['sunrise'], s_dia['sunset']
         dur = (at_dt - am_dt).total_seconds() / 3600
         data.append({
-            "Día": i+1, "Am": am_dt.hour + am_dt.minute/60, "Dur": dur, 
-            "Amanece": am_dt, "Atardece": at_dt, "Fecha": dia_m
+            "Día": i+1, 
+            "Am_dec": am_dt.hour + am_dt.minute/60, 
+            "Dur": dur, 
+            "Amanece": am_dt.strftime('%H:%M'), 
+            "Atardece": at_dt.strftime('%H:%M'), 
+            "Fecha": dia_m.strftime("%d %b"),
+            "Luna": get_moon_phase_data(dia_m),
+            "Full_Fecha": dia_m # Para cálculos de abajo
         })
     except: continue
 
 df = pd.DataFrame(data)
 
-# --- GRÁFICO ---
+# --- GRÁFICO CON BARRA Y HOVER ---
 fig = go.Figure()
 fig.add_trace(go.Bar(
-    x=df["Día"], y=df["Dur"], base=df["Am"], 
+    x=df["Día"], y=df["Dur"], base=df["Am_dec"], 
     marker_color=[get_season_color(i) for i in df["Día"]],
-    hoverinfo="none"
+    customdata=df[["Amanece", "Atardece", "Fecha", "Luna"]],
+    hovertemplate="""
+    <b>%{customdata[2]}</b><br>
+    🌅 Salida: %{customdata[0]}<br>
+    🌇 Puesta: %{customdata[1]}<br>
+    🌙 Luna: %{customdata[3]}
+    <extra></extra>
+    """
 ))
 
-# Marcadores de estaciones en el eje X
+# Iconos estaciones
 estaciones = [
-    {"dia": 80, "icon": "🌱", "label": "Primavera"},
-    {"dia": 172, "icon": "☀️", "label": "Verano"},
-    {"dia": 264, "icon": "🍂", "label": "Otoño"},
-    {"dia": 355, "icon": "❄️", "label": "Invierno"}
+    {"dia": 80, "icon": "🌱"}, {"dia": 172, "icon": "☀️"},
+    {"dia": 264, "icon": "🍂"}, {"dia": 355, "icon": "❄️"}
 ]
-
 for est in estaciones:
-    fig.add_annotation(
-        x=est["dia"], y=0, text=est["icon"], showarrow=False,
-        font=dict(size=20), yshift=-30
-    )
+    fig.add_annotation(x=est["dia"], y=0, text=est["icon"], showarrow=False, font=dict(size=20), yshift=-30)
 
 fig.add_vline(x=ahora.timetuple().tm_yday, line_width=2, line_color="red")
 
 fig.update_layout(
-    template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=60),
+    template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=60),
     yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
-    xaxis=dict(tickmode='array', tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
-               ticktext=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'])
+    xaxis=dict(
+        tickmode='array', 
+        tickvals=[1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
+        ticktext=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        rangeslider=dict(visible=True, thickness=0.04) # RECUPERADA LA BARRA
+    )
 )
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# --- DATOS DE INTERÉS (FOOTER) ---
-st.subheader("📊 Efemérides de este año")
-
-# Cálculos de extremos
+# --- DATOS DE INTERÉS ---
+st.markdown("### 📊 Efemérides del Año")
 dia_largo = df.loc[df['Dur'].idxmax()]
 dia_corto = df.loc[df['Dur'].idxmin()]
-amanece_antes = df.loc[df['Amanece'].dt.time == df['Amanece'].dt.time.min()].iloc[0]
-atardece_tarde = df.loc[df['Atardece'].dt.time == df['Atardece'].dt.time.max()].iloc[0]
+# Convertir string a objeto datetime para comparar amaneceres correctamente
+df['Amanece_dt'] = pd.to_datetime(df['Amanece'], format='%H:%M')
+df['Atardece_dt'] = pd.to_datetime(df['Atardece'], format='%H:%M')
+am_antes = df.loc[df['Amanece_dt'].idxmin()]
+at_tarde = df.loc[df['Atardece_dt'].idxmax()]
 
-# Cambio de hora (estimación España/Europa: último domingo de marzo y octubre)
-def get_dst_dates(year):
-    # Marzo
-    m = datetime(year, 3, 31)
-    d_marzo = m - timedelta(days=(m.weekday() + 1) % 7)
-    # Octubre
-    o = datetime(year, 10, 31)
-    d_octubre = o - timedelta(days=(o.weekday() + 1) % 7)
-    return d_marzo, d_octubre
-
-dst_m, dst_o = get_dst_dates(ahora.year)
+def get_dst(year):
+    m = datetime(year, 3, 31); d_m = m - timedelta(days=(m.weekday() + 1) % 7)
+    o = datetime(year, 10, 31); d_o = o - timedelta(days=(o.weekday() + 1) % 7)
+    return d_m, d_o
+dst_m, dst_o = get_dst(ahora.year)
 
 f1, f2, f3 = st.columns(3)
 with f1:
-    st.write(f"🔝 **Día más largo:** {dia_largo['Fecha'].strftime('%d de %B')} ({round(dia_largo['Dur'], 2)}h)")
-    st.write(f"📉 **Día más corto:** {dia_corto['Fecha'].strftime('%d de %B')} ({round(dia_corto['Dur'], 2)}h)")
+    st.write(f"🔝 **Día más largo:** {dia_largo['Fecha']} ({round(dia_largo['Dur'], 1)}h)")
+    st.write(f"📉 **Día más corto:** {dia_corto['Fecha']} ({round(dia_corto['Dur'], 1)}h)")
 with f2:
-    st.write(f"🌅 **Amanece más pronto:** {amanece_antes['Fecha'].strftime('%d de %B')} ({amanece_antes['Amanece'].strftime('%H:%M')})")
-    st.write(f"🌇 **Atardece más tarde:** {atardece_tarde['Fecha'].strftime('%d de %B')} ({atardece_tarde['Atardece'].strftime('%H:%M')})")
+    st.write(f"🌅 **Amanece antes:** {am_antes['Fecha']} ({am_antes['Amanece']})")
+    st.write(f"🌇 **Atardece más tarde:** {at_tarde['Fecha']} ({at_tarde['Atardece']})")
 with f3:
-    st.write(f"🕐 **Cambio de hora (Verano):** {dst_m.strftime('%d de marzo')}")
-    st.write(f"🕒 **Cambio de hora (Invierno):** {dst_o.strftime('%d de octubre')}")
+    st.write(f"🕐 **Cambio Verano:** {dst_m.strftime('%d de marzo')}")
+    st.write(f"🕒 **Cambio Invierno:** {dst_o.strftime('%d de octubre')}")
     
