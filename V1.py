@@ -17,7 +17,7 @@ st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 def buscar_lugar_robusto(texto):
     if not texto: return None
     try:
-        geolocator = Nominatim(user_agent="solar_app_v6")
+        geolocator = Nominatim(user_agent="solar_app_v7")
         return geolocator.geocode(texto, timeout=10, language="es")
     except: return None
 
@@ -36,7 +36,7 @@ def get_season_color(d):
     elif d < 264: return 'rgb(255, 165, 0)'   
     else: return 'rgb(210, 105, 30)'
 
-# --- ESTADO Y UBICACIÓN ---
+# --- ESTADO ---
 if 'lat' not in st.session_state:
     st.session_state.lat, st.session_state.lon = 39.664, -0.228
     st.session_state.dir = "Puerto de Sagunto"
@@ -45,6 +45,7 @@ if 'graph_key' not in st.session_state:
 
 st.title("☀️ Agenda Solar")
 
+# --- UBICACIÓN ---
 col_gps, col_txt = st.columns([1, 2])
 with col_gps:
     if st.button("📍 GPS"):
@@ -52,7 +53,6 @@ with col_gps:
         if loc:
             st.session_state.lat, st.session_state.lon = loc['coords']['latitude'], loc['coords']['longitude']
             st.session_state.dir = "Ubicación GPS"
-            st.session_state.graph_key += 1
             st.rerun()
 
 with col_txt:
@@ -62,7 +62,6 @@ with col_txt:
         if res:
             st.session_state.lat, st.session_state.lon = res.latitude, res.longitude
             st.session_state.dir = res.address.split(',')[0]
-            st.session_state.graph_key += 1
             st.rerun()
 
 tf = TimezoneFinder()
@@ -72,9 +71,21 @@ city = LocationInfo("P", "R", tz_name, st.session_state.lat, st.session_state.lo
 ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state.dir}")
-vista = st.radio("Escala:", ["Días", "Semanas", "Meses"], horizontal=True)
 
-# --- PREPARACIÓN DE DATOS ---
+# --- 1. DATOS DE HOY (SIEMPRE ARRIBA) ---
+st.subheader("🗓️ Datos de Hoy")
+s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
+s_man = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
+dif_seg = (s_man['sunset']-s_man['sunrise']).total_seconds() - (s_hoy['sunset']-s_hoy['sunrise']).total_seconds()
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
+c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
+c3.metric("Mañana habrá", f"{int(abs(dif_seg)//60)}m {int(abs(dif_seg)%60)}s", 
+          delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz")
+
+# --- 2. EL GRÁFICO (EN SU SITIO ORIGINAL) ---
+vista = st.radio("Escala:", ["Días", "Semanas", "Meses"], horizontal=True)
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
 max_x = 366 if ahora.year % 4 == 0 else 365
@@ -90,49 +101,38 @@ for i in range(0, max_x, pasos[vista]):
     except: continue
 df = pd.DataFrame(data)
 
-# --- EL GRÁFICO (AHORA VA PRIMERO EN EL CÓDIGO) ---
 fig = go.Figure()
 fig.add_trace(go.Bar(x=df["X"], y=df["Dur"], base=df["Am"], marker_color=df["Color"]))
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
-fig.update_layout(template="plotly_dark", height=350, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
                   yaxis=dict(range=[0, 24], fixedrange=True, dtick=4),
                   xaxis=dict(range=[1, max_x if vista=="Días" else 12], fixedrange=True, rangeslider=dict(visible=True, thickness=0.08)),
                   clickmode='event+select')
 
-# Capturamos el evento. Al usar on_select="rerun", el script vuelve a empezar sabiendo qué has tocado.
+# La clave de la solución: capturamos la selección en una variable
 event_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", key=f"g_{st.session_state.graph_key}")
 
-# --- PANELES DE DATOS (SE DIBUJAN DESPUÉS DE CAPTURAR LA SELECCIÓN) ---
-st.divider()
+# --- 3. DATOS DE SELECCIÓN (DEBAJO DEL GRÁFICO) ---
+# Usamos un contenedor vacío que rellenamos si hay selección
+selection_container = st.container()
 
-# 1. Panel de HOY (Siempre arriba)
-s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
-s_man = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
-dif_seg = (s_man['sunset']-s_man['sunrise']).total_seconds() - (s_hoy['sunset']-s_hoy['sunrise']).total_seconds()
-
-st.subheader("🗓️ Hoy")
-c1, c2, c3 = st.columns(3)
-c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
-c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
-c3.metric("Cambio", f"{int(abs(dif_seg)//60)}m {int(abs(dif_seg)%60)}s", delta="Más luz" if dif_seg > 0 else "Menos luz")
-
-# 2. Panel de SELECCIÓN (Aparece instantáneamente al tocar)
-if event_data and len(event_data.get("selection", {}).get("points", [])) > 0:
-    idx = event_data["selection"]["points"][0]["point_index"]
-    f_sel = df.iloc[idx]
-    fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
-    s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
-    
-    st.markdown(f"### 🔍 Seleccionado: {fecha_sel.strftime('%d %B')}")
-    sc1, sc2, sc3 = st.columns(3)
-    sc1.metric("Amanecer", s_sel['sunrise'].strftime('%H:%M'))
-    sc2.metric("Atardecer", s_sel['sunset'].strftime('%H:%M'))
-    sc3.metric("Luna", get_moon_phase(fecha_sel))
-    
-    if st.button("✖️ Cerrar"):
-        st.session_state.graph_key += 1
-        st.rerun()
-else:
-    st.info("👆 Toca una barra para comparar.")
-    
+with selection_container:
+    if event_data and "selection" in event_data and len(event_data["selection"]["points"]) > 0:
+        idx = event_data["selection"]["points"][0]["point_index"]
+        f_sel = df.iloc[idx]
+        fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
+        s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
+        
+        st.markdown(f"### 🔍 Detalles del {fecha_sel.strftime('%d de %B')}")
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Amanecer", s_sel['sunrise'].strftime('%H:%M'))
+        sc2.metric("Atardecer", s_sel['sunset'].strftime('%H:%M'))
+        sc3.metric("Luna", get_moon_phase(fecha_sel))
+        
+        if st.button("✖️ Cerrar selección"):
+            st.session_state.graph_key += 1
+            st.rerun()
+    else:
+        st.info("👆 Toca una barra para comparar con hoy.")
+        
