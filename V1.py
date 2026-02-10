@@ -32,27 +32,27 @@ def get_moon_phase(date):
     elif p < 0.9: return "🌔"
     else: return "🌕"
 
-def get_season_color(d):
-    if d < 80 or d > 355: return 'rgb(100, 149, 237)' 
-    elif d < 172: return 'rgb(144, 238, 144)' 
-    elif d < 264: return 'rgb(255, 165, 0)'   
-    else: return 'rgb(210, 105, 30)'
-
-# --- INICIALIZACIÓN DE SESIÓN ---
+# --- LÓGICA DE UBICACIÓN INTELIGENTE ---
 if 'lat' not in st.session_state:
-    st.session_state['lat'] = 39.664
-if 'lon' not in st.session_state:
-    st.session_state['lon'] = -0.228
-if 'dir' not in st.session_state:
-    st.session_state['dir'] = "Puerto de Sagunto"
+    # Intentamos pillar el GPS nada más entrar
+    loc = get_geolocation()
+    if loc:
+        st.session_state['lat'] = loc['coords']['latitude']
+        st.session_state['lon'] = loc['coords']['longitude']
+        st.session_state['dir'] = "Mi ubicación"
+    else:
+        # Si falla o el usuario no da permiso, defecto: Sagunto
+        st.session_state['lat'] = 39.664
+        st.session_state['lon'] = -0.228
+        st.session_state['dir'] = "Puerto de Sagunto"
 
 st.title("☀️ Agenda Solar")
 
-# --- BUSCADOR Y GPS ---
+# --- BUSCADOR Y GPS (MANUAL) ---
 col_gps, col_txt = st.columns([1, 3])
 
 with col_gps:
-    if st.button("📍 GPS"):
+    if st.button("📍 Forzar GPS"):
         loc = get_geolocation()
         if loc:
             st.session_state['lat'] = loc['coords']['latitude']
@@ -61,7 +61,7 @@ with col_gps:
             st.rerun()
 
 with col_txt:
-    entrada = st.text_input("Ciudad o CP", placeholder="Ej: Sagunto", label_visibility="collapsed")
+    entrada = st.text_input("Cambiar ciudad o CP...", placeholder="Ej: Madrid", label_visibility="collapsed")
     if entrada:
         res = buscar_lugar_robusto(entrada)
         if res:
@@ -79,7 +79,7 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state['dir']}")
 
-# --- MÉTRICAS (LOS CUADRITOS) ---
+# --- MÉTRICAS ---
 s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
 s2 = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
 dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
@@ -100,45 +100,39 @@ st.metric(
 )
 st.markdown("---")
 
-# --- GRÁFICO ANUAL ---
-vista = st.radio("Escala del gráfico:", ["Días", "Semanas", "Meses"], horizontal=True)
-
+# --- GRÁFICO CON DEGRADADO ---
+# Creamos un degradado que simula el cielo: azul oscuro -> naranja -> amarillo -> naranja -> azul oscuro
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
-max_x = 366 if ahora.year % 4 == 0 else 365
-pasos = {"Días": 1, "Semanas": 7, "Meses": 30}
-
-for i in range(0, max_x, pasos[vista]):
+for i in range(0, 365):
     dia_m = inicio_año + timedelta(days=i)
     try:
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
         am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
         at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
-        x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
-        data.append({
-            "X": x_val, "Am": am, "Dur": at - am, 
-            "T_A": s_dia['sunrise'].strftime('%H:%M'), "T_At": s_dia['sunset'].strftime('%H:%M'), 
-            "L": dia_m.strftime("%d %b"), "Color": get_season_color(i)
-        })
+        data.append({"Día": i+1, "Am": am, "Dur": at - am, "Fecha": dia_m.strftime("%d %b")})
     except: continue
 
 df = pd.DataFrame(data)
+
 fig = go.Figure()
 fig.add_trace(go.Bar(
-    x=df["X"], y=df["Dur"], base=df["Am"], 
-    marker_color=df["Color"],
-    customdata=df[["T_A", "T_At", "L"]],
-    hovertemplate="<b>%{customdata[2]}</b><br>Salida: %{customdata[0]}<br>Puesta: %{customdata[1]}<extra></extra>"
+    x=df["Día"], y=df["Dur"], base=df["Am"],
+    marker=dict(
+        color=df["Dur"],
+        colorscale=[[0, '#1A237E'], [0.5, '#FF7043'], [1, '#FDD835']], # Azul -> Naranja -> Amarillo
+        showscale=False
+    ),
+    hovertemplate="<b>%{customdata}</b><extra></extra>",
+    customdata=df["Fecha"]
 ))
 
-# Línea de Hoy
-hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
-fig.add_vline(x=hoy_x, line_width=2, line_color="red")
+fig.add_vline(x=ahora.timetuple().tm_yday, line_width=2, line_color="red")
 
 fig.update_layout(
-    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
+    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10),
     yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
-    xaxis=dict(fixedrange=True, rangeslider=dict(visible=True, thickness=0.06))
+    xaxis=dict(title="Día del año", rangeslider=dict(visible=True, thickness=0.05))
 )
 
-st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+st.plotly_chart(fig, use_container_width=True)
