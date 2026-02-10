@@ -17,7 +17,7 @@ st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 def buscar_lugar_robusto(texto):
     if not texto: return None
     try:
-        geolocator = Nominatim(user_agent="solar_app_v8")
+        geolocator = Nominatim(user_agent="solar_app_v9")
         return geolocator.geocode(texto, timeout=10, language="es")
     except: return None
 
@@ -36,12 +36,12 @@ def get_season_color(d):
     elif d < 264: return 'rgb(255, 165, 0)'   
     else: return 'rgb(210, 105, 30)'
 
-# --- ESTADO DE LA SESIÓN ---
+# --- ESTADO DE SESIÓN ---
 if 'lat' not in st.session_state:
     st.session_state.lat, st.session_state.lon = 39.664, -0.228
     st.session_state.dir = "Puerto de Sagunto"
 if 'sel_idx' not in st.session_state:
-    st.session_state.sel_idx = None # Índice del día seleccionado por el usuario
+    st.session_state.sel_idx = None
 
 st.title("☀️ Agenda Solar")
 
@@ -74,11 +74,13 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state.dir}")
 
-# --- 1. DATOS DE HOY ---
+# --- 1. DATOS DE HOY (FIJOS) ---
 st.subheader("🗓️ Datos de Hoy")
 s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
 s_man = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
-dif_seg = (s_man['sunset']-s_man['sunrise']).total_seconds() - (s_hoy['sunset']-s_hoy['sunrise']).total_seconds()
+dur_hoy = (s_hoy['sunset'] - s_hoy['sunrise']).total_seconds()
+dur_man = (s_man['sunset'] - s_man['sunrise']).total_seconds()
+dif_seg = dur_man - dur_hoy
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Amanecer", s_hoy['sunrise'].strftime('%H:%M'))
@@ -86,7 +88,7 @@ c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
 c3.metric("Mañana habrá", f"{int(abs(dif_seg)//60)}m {int(abs(dif_seg)%60)}s", 
           delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz")
 
-# --- 2. GENERAR DATOS DEL GRÁFICO ---
+# --- 2. GENERAR DATOS GRÁFICO ---
 vista = st.radio("Escala:", ["Días", "Semanas", "Meses"], horizontal=True)
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
@@ -97,13 +99,14 @@ for i in range(0, max_x, pasos[vista]):
     dia_m = inicio_año + timedelta(days=i)
     try:
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
-        am, at = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60, s_dia['sunset'].hour + s_dia['sunset'].minute/60
+        am = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60
+        at = s_dia['sunset'].hour + s_dia['sunset'].minute/60
         x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
         data.append({"X": x_val, "Am": am, "Dur": at - am, "Fecha": dia_m, "Color": get_season_color(i), "Label": dia_m.strftime("%d %b")})
     except: continue
 df = pd.DataFrame(data)
 
-# --- 3. CONSTRUIR GRÁFICO ---
+# --- 3. GRÁFICO E INTERACCIÓN ---
 fig = go.Figure()
 fig.add_trace(go.Bar(
     x=df["X"], y=df["Dur"], base=df["Am"], 
@@ -111,29 +114,28 @@ fig.add_trace(go.Bar(
     hovertemplate="<b>%{customdata}</b><extra></extra>"
 ))
 
-# Línea de HOY (Roja)
+# Marcador de Hoy (Rojo)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
-fig.add_vline(x=hoy_x, line_width=2, line_color="red", annotation_text="Hoy")
+fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
 # Captura de eventos
 event_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", key="sun_chart")
 
-# Lógica de actualización de selección
+# Lógica para evitar el retraso: Actualizar estado antes de dibujar detalles
 if event_data and "selection" in event_data and len(event_data["selection"]["points"]) > 0:
     new_idx = event_data["selection"]["points"][0]["point_index"]
     if st.session_state.sel_idx != new_idx:
         st.session_state.sel_idx = new_idx
         st.rerun()
 
-# --- 4. PANEL DE SELECCIÓN Y MARCADOR VISUAL ---
+# --- 4. PANEL DE SELECCIÓN ---
 if st.session_state.sel_idx is not None:
     f_sel = df.iloc[st.session_state.sel_idx]
-    
-    # Dibujamos una línea cian en el gráfico para marcar lo seleccionado visualmente
-    fig.add_vline(x=f_sel["X"], line_width=3, line_dash="dash", line_color="cyan")
-    
     fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
     s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
+    
+    # Marcador visual en el gráfico para la selección (Cian)
+    fig.add_vline(x=f_sel["X"], line_width=3, line_dash="dash", line_color="cyan")
     
     st.markdown(f"### 🔍 Detalles del {fecha_sel.strftime('%d de %B')}")
     sc1, sc2, sc3 = st.columns(3)
@@ -141,5 +143,9 @@ if st.session_state.sel_idx is not None:
     sc2.metric("Atardecer", s_sel['sunset'].strftime('%H:%M'))
     sc3.metric("Luna", get_moon_phase(fecha_sel))
     
-    if st.
-    
+    if st.button("✖️ Cerrar selección"):
+        st.session_state.sel_idx = None
+        st.rerun()
+else:
+    st.info("👆 Toca una barra para comparar con hoy.")
+            
