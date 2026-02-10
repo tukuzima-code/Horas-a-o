@@ -17,7 +17,7 @@ st.set_page_config(page_title="Luz Solar Pro", layout="centered")
 def buscar_lugar_robusto(texto):
     if not texto: return None
     try:
-        geolocator = Nominatim(user_agent="solar_app_v7")
+        geolocator = Nominatim(user_agent="solar_app_v8")
         return geolocator.geocode(texto, timeout=10, language="es")
     except: return None
 
@@ -36,12 +36,12 @@ def get_season_color(d):
     elif d < 264: return 'rgb(255, 165, 0)'   
     else: return 'rgb(210, 105, 30)'
 
-# --- ESTADO ---
+# --- ESTADO DE LA SESIÓN ---
 if 'lat' not in st.session_state:
     st.session_state.lat, st.session_state.lon = 39.664, -0.228
     st.session_state.dir = "Puerto de Sagunto"
-if 'graph_key' not in st.session_state:
-    st.session_state.graph_key = 0
+if 'sel_idx' not in st.session_state:
+    st.session_state.sel_idx = None # Índice del día seleccionado por el usuario
 
 st.title("☀️ Agenda Solar")
 
@@ -53,6 +53,7 @@ with col_gps:
         if loc:
             st.session_state.lat, st.session_state.lon = loc['coords']['latitude'], loc['coords']['longitude']
             st.session_state.dir = "Ubicación GPS"
+            st.session_state.sel_idx = None
             st.rerun()
 
 with col_txt:
@@ -62,6 +63,7 @@ with col_txt:
         if res:
             st.session_state.lat, st.session_state.lon = res.latitude, res.longitude
             st.session_state.dir = res.address.split(',')[0]
+            st.session_state.sel_idx = None
             st.rerun()
 
 tf = TimezoneFinder()
@@ -72,7 +74,7 @@ ahora = datetime.now(local_tz)
 
 st.success(f"📍 {st.session_state.dir}")
 
-# --- 1. DATOS DE HOY (SIEMPRE ARRIBA) ---
+# --- 1. DATOS DE HOY ---
 st.subheader("🗓️ Datos de Hoy")
 s_hoy = sun(city.observer, date=ahora, tzinfo=local_tz)
 s_man = sun(city.observer, date=ahora + timedelta(days=1), tzinfo=local_tz)
@@ -84,7 +86,7 @@ c2.metric("Atardecer", s_hoy['sunset'].strftime('%H:%M'))
 c3.metric("Mañana habrá", f"{int(abs(dif_seg)//60)}m {int(abs(dif_seg)%60)}s", 
           delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz")
 
-# --- 2. EL GRÁFICO (EN SU SITIO ORIGINAL) ---
+# --- 2. GENERAR DATOS DEL GRÁFICO ---
 vista = st.radio("Escala:", ["Días", "Semanas", "Meses"], horizontal=True)
 data = []
 inicio_año = datetime(ahora.year, 1, 1, tzinfo=local_tz)
@@ -97,42 +99,47 @@ for i in range(0, max_x, pasos[vista]):
         s_dia = sun(city.observer, date=dia_m, tzinfo=local_tz)
         am, at = s_dia['sunrise'].hour + s_dia['sunrise'].minute/60, s_dia['sunset'].hour + s_dia['sunset'].minute/60
         x_val = i+1 if vista == "Días" else (dia_m.isocalendar()[1] if vista == "Semanas" else dia_m.month)
-        data.append({"X": x_val, "Am": am, "Dur": at - am, "Fecha": dia_m, "Color": get_season_color(i)})
+        data.append({"X": x_val, "Am": am, "Dur": at - am, "Fecha": dia_m, "Color": get_season_color(i), "Label": dia_m.strftime("%d %b")})
     except: continue
 df = pd.DataFrame(data)
 
+# --- 3. CONSTRUIR GRÁFICO ---
 fig = go.Figure()
-fig.add_trace(go.Bar(x=df["X"], y=df["Dur"], base=df["Am"], marker_color=df["Color"]))
+fig.add_trace(go.Bar(
+    x=df["X"], y=df["Dur"], base=df["Am"], 
+    marker_color=df["Color"], customdata=df["Label"],
+    hovertemplate="<b>%{customdata}</b><extra></extra>"
+))
+
+# Línea de HOY (Roja)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
-fig.add_vline(x=hoy_x, line_width=2, line_color="red")
-fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
-                  yaxis=dict(range=[0, 24], fixedrange=True, dtick=4),
-                  xaxis=dict(range=[1, max_x if vista=="Días" else 12], fixedrange=True, rangeslider=dict(visible=True, thickness=0.08)),
-                  clickmode='event+select')
+fig.add_vline(x=hoy_x, line_width=2, line_color="red", annotation_text="Hoy")
 
-# La clave de la solución: capturamos la selección en una variable
-event_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", key=f"g_{st.session_state.graph_key}")
+# Captura de eventos
+event_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points", key="sun_chart")
 
-# --- 3. DATOS DE SELECCIÓN (DEBAJO DEL GRÁFICO) ---
-# Usamos un contenedor vacío que rellenamos si hay selección
-selection_container = st.container()
+# Lógica de actualización de selección
+if event_data and "selection" in event_data and len(event_data["selection"]["points"]) > 0:
+    new_idx = event_data["selection"]["points"][0]["point_index"]
+    if st.session_state.sel_idx != new_idx:
+        st.session_state.sel_idx = new_idx
+        st.rerun()
 
-with selection_container:
-    if event_data and "selection" in event_data and len(event_data["selection"]["points"]) > 0:
-        idx = event_data["selection"]["points"][0]["point_index"]
-        f_sel = df.iloc[idx]
-        fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
-        s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
-        
-        st.markdown(f"### 🔍 Detalles del {fecha_sel.strftime('%d de %B')}")
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.metric("Amanecer", s_sel['sunrise'].strftime('%H:%M'))
-        sc2.metric("Atardecer", s_sel['sunset'].strftime('%H:%M'))
-        sc3.metric("Luna", get_moon_phase(fecha_sel))
-        
-        if st.button("✖️ Cerrar selección"):
-            st.session_state.graph_key += 1
-            st.rerun()
-    else:
-        st.info("👆 Toca una barra para comparar con hoy.")
-        
+# --- 4. PANEL DE SELECCIÓN Y MARCADOR VISUAL ---
+if st.session_state.sel_idx is not None:
+    f_sel = df.iloc[st.session_state.sel_idx]
+    
+    # Dibujamos una línea cian en el gráfico para marcar lo seleccionado visualmente
+    fig.add_vline(x=f_sel["X"], line_width=3, line_dash="dash", line_color="cyan")
+    
+    fecha_sel = f_sel['Fecha'].replace(tzinfo=local_tz)
+    s_sel = sun(city.observer, date=fecha_sel, tzinfo=local_tz)
+    
+    st.markdown(f"### 🔍 Detalles del {fecha_sel.strftime('%d de %B')}")
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.metric("Amanecer", s_sel['sunrise'].strftime('%H:%M'))
+    sc2.metric("Atardecer", s_sel['sunset'].strftime('%H:%M'))
+    sc3.metric("Luna", get_moon_phase(fecha_sel))
+    
+    if st.
+    
