@@ -11,7 +11,12 @@ import pytz
 import random
 from streamlit_js_eval import get_geolocation
 
-st.set_page_config(page_title="Luz Solar Pro", layout="centered")
+# --- CONFIGURACIÓN DE PÁGINA ANCHA ---
+st.set_page_config(
+    page_title="Luz Solar Pro", 
+    layout="wide",  # Esto hace que use todo el ancho en ordenador
+    initial_sidebar_state="collapsed"
+)
 
 # --- FUNCIONES ---
 @st.cache_data(show_spinner=False, ttl=300)
@@ -44,12 +49,12 @@ if 'lat' not in st.session_state:
     st.session_state['lat'], st.session_state['lon'] = 39.664, -0.228
     st.session_state['dir'] = "Puerto de Sagunto"
 
-st.title("☀️ Agenda Solar")
+st.title("☀️ Agenda Solar Pro")
 
 # --- BUSCADOR ---
-col_gps, col_txt = st.columns([1, 3])
+col_gps, col_txt = st.columns([1, 4]) # Ajustado el ratio para pantalla ancha
 with col_gps:
-    if st.button("📍 GPS"):
+    if st.button("📍 Mi ubicación (GPS)", use_container_width=True):
         loc = get_geolocation()
         if loc:
             st.session_state['lat'] = loc['coords']['latitude']
@@ -58,7 +63,7 @@ with col_gps:
             st.rerun()
 
 with col_txt:
-    entrada = st.text_input("Ciudad o CP", placeholder="Ej: Sagunto", label_visibility="collapsed")
+    entrada = st.text_input("Buscar ciudad o código postal...", placeholder="Ej: Sagunto", label_visibility="collapsed")
     if entrada:
         res = buscar_lugar_robusto(entrada)
         if res:
@@ -74,7 +79,7 @@ local_tz = pytz.timezone(tz_name)
 city = LocationInfo("P", "R", tz_name, st.session_state['lat'], st.session_state['lon'])
 ahora = datetime.now(local_tz)
 
-st.success(f"📍 {st.session_state['dir']}")
+st.info(f"📍 Mostrando datos para: **{st.session_state['dir']}**")
 
 # --- MÉTRICAS ---
 s1 = sun(city.observer, date=ahora, tzinfo=local_tz)
@@ -83,21 +88,19 @@ dur1 = (s1['sunset'] - s1['sunrise']).total_seconds()
 dur2 = (s2['sunset'] - s2['sunrise']).total_seconds()
 dif_seg = dur2 - dur1
 
-st.markdown("---")
-m1, m2, m3 = st.columns(3)
+# En ordenador se verán 4 columnas en una fila
+m1, m2, m3, m4 = st.columns(4)
 m1.metric("🌅 Amanecer", s1['sunrise'].strftime('%H:%M'))
 m2.metric("🌇 Atardecer", s1['sunset'].strftime('%H:%M'))
 m3.metric("🌓 Luna", get_moon_phase_data(ahora))
 
 minutos, segundos = int(abs(dif_seg)//60), int(abs(dif_seg)%60)
-st.metric(
-    label="⏱️ Cambio de luz mañana", 
-    value=f"{minutos}m {segundos}s", 
-    delta="Ganando luz" if dif_seg > 0 else "Perdiendo luz"
-)
+trend = "aumentando" if dif_seg > 0 else "disminuyendo"
+m4.metric("⏱️ Cambio luz", f"{minutos}m {segundos}s", delta=trend)
+
 st.markdown("---")
 
-# --- GRÁFICO ---
+# --- GRÁFICO ANUAL (AHORA MÁS ANCHO) ---
 vista = st.radio("Escala del gráfico:", ["Días", "Semanas", "Meses"], horizontal=True)
 
 data = []
@@ -133,14 +136,16 @@ fig.add_trace(go.Bar(
     hovertemplate="<b>%{customdata[2]}</b><br>🌅 Salida: %{customdata[0]}<br>🌇 Puesta: %{customdata[1]}<br>🌙 Luna: %{customdata[3]}<extra></extra>"
 ))
 
-# Línea de Hoy
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
 fig.update_layout(
-    template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
-    yaxis=dict(range=[0, 24], dtick=4, title="Horas"),
-    xaxis=dict(fixedrange=True, rangeslider=dict(visible=True, thickness=0.06))
+    template="plotly_dark", 
+    height=500, # Un poco más alto para ordenador
+    margin=dict(l=10, r=10, t=10, b=10), 
+    showlegend=False,
+    yaxis=dict(range=[0, 24], dtick=2, title="Horas del día (0-24h)"), # dtick 2 para más detalle en pantalla grande
+    xaxis=dict(fixedrange=True, rangeslider=dict(visible=True, thickness=0.03))
 )
 
 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
