@@ -68,7 +68,6 @@ elif st.session_state.modo == "texto":
         direccion = res.address.split(',')[0]
     else: st.warning("⚠️ Usando Puerto de Sagunto.")
 
-# --- PROCESAMIENTO ---
 vista = st.radio("Ver por:", ["Días", "Semanas", "Meses"], horizontal=True)
 tf = TimezoneFinder()
 tz_name = tf.timezone_at(lng=lon, lat=lat) or "Europe/Madrid"
@@ -103,7 +102,7 @@ rango_limite = max_x if vista == "Días" else (53 if vista == "Semanas" else 12)
 hoy_x = ahora.timetuple().tm_yday if vista == "Días" else (ahora.isocalendar()[1] if vista == "Semanas" else ahora.month)
 fig.add_vline(x=hoy_x, line_width=2, line_color="red")
 
-# BLOQUEO AGRESIVO DE EJES
+# CONFIGURACIÓN COMPATIBLE Y ESTABLE
 fig.update_layout(
     template="plotly_dark", 
     dragmode="pan", 
@@ -111,17 +110,15 @@ fig.update_layout(
     margin=dict(l=10, r=10, t=10, b=10), 
     showlegend=False,
     yaxis=dict(
+        title="Hora",
         range=[0, 24], 
-        fixedrange=True # Esto evita que el eje Y se mueva nada
+        fixedrange=True,
+        dtick=2
     ),
     xaxis=dict(
         title=vista,
         range=[1, rango_limite],
-        # Los siguientes dos parámetros evitan que se salga de los bordes del año
-        autorange=False,
-        fixedrange=False,
-        # Impedimos que el usuario arrastre fuera de los límites 1 a 366
-        rangebounds=[1, rango_limite] if vista == "Días" else None 
+        fixedrange=False # Permite zoom solo en X
     )
 )
 
@@ -130,4 +127,4 @@ st.plotly_chart(fig, use_container_width=True, config={
     'displayModeBar': False,
     'doubleClick': 'reset',
 })
-st.caption("📱 Pellizca horizontalmente. La vista está limitada estrictamente al año actual.")
+st.caption("📱 Pellizca horizontalmente • Doble toque para reajustar al año completo.")
